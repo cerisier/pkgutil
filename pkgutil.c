@@ -79,10 +79,12 @@ again:
   }
 
   if (state == state_next_word) {
-    if ((*argv)[0] == NULL)
+    if ((*argv)[0] == NULL) {
       return (-1);
-    if ((*argv)[0][0] != '-')
+    }
+    if ((*argv)[0][0] != '-') {
       return (-1);
+    }
     if (strcmp((*argv)[0], "--") == 0) {
       ++(*argv);
       --(*argc);
@@ -102,12 +104,15 @@ again:
   if (state == state_short) {
     opt = *opt_word++;
     p = strchr(short_options, opt);
-    if (p == NULL)
+    if (p == NULL) {
       return ('?');
-    if (p[1] == ':')
+    }
+    if (p[1] == ':') {
       required = 1;
-    if (*opt_word == '\0')
+    }
+    if (*opt_word == '\0') {
       state = state_next_word;
+    }
     if (required) {
       if (*opt_word != '\0') {
         *arg = opt_word;
@@ -126,21 +131,25 @@ again:
   if (state == state_long) {
     optlength = strcspn(opt_word, "=");
     for (popt = pkg_longopts; popt->name != NULL; popt++) {
-      if (strncmp(opt_word, popt->name, optlength) != 0)
+      if (strncmp(opt_word, popt->name, optlength) != 0) {
         continue;
+      }
       if (strlen(popt->name) == optlength) {
         match = popt;
         break;
       }
-      if (match == NULL)
+      if (match == NULL) {
         match = popt;
-      else
+      } else {
         match2 = popt;
+      }
     }
-    if (match == NULL)
+    if (match == NULL) {
       return ('?');
-    if (match2 != NULL)
+    }
+    if (match2 != NULL) {
       return ('?');
+    }
     opt = match->equivalent;
     required = match->required;
     if (required) {
@@ -172,8 +181,9 @@ struct astream {
 static int astream_fill(struct astream *s) {
   int r;
 
-  if (s->eof)
+  if (s->eof) {
     return (ARCHIVE_EOF);
+  }
 
   r = archive_read_data_block(s->a, (const void **)&s->blk, &s->blksz, &s->off);
   s->pos = 0;
@@ -181,8 +191,9 @@ static int astream_fill(struct astream *s) {
     s->eof = 1;
     return (ARCHIVE_EOF);
   }
-  if (r != ARCHIVE_OK)
+  if (r != ARCHIVE_OK) {
     return (r);
+  }
 
   return (ARCHIVE_OK);
 }
@@ -196,12 +207,14 @@ static int astream_open_cb(struct archive *a, void *client_data) {
 static la_ssize_t astream_read_cb(struct archive *a, void *client_data,
                                   const void **buff) {
   struct astream *s = (struct astream *)client_data;
-  if (s->eof)
+  if (s->eof) {
     return (0);
+  }
   if (s->blk == NULL || s->pos == s->blksz) {
     int r = astream_fill(s);
-    if (r == ARCHIVE_EOF)
+    if (r == ARCHIVE_EOF) {
       return (0);
+    }
     if (r != ARCHIVE_OK) {
       archive_set_error(a, archive_errno(s->a), "%s",
                         archive_error_string(s->a));
@@ -229,57 +242,68 @@ static void extract_nested_archive_from_stream(struct astream *in,
   int flags;
   char *cwd = NULL;
 
-  if (a == NULL || disk == NULL)
+  if (a == NULL || disk == NULL) {
     fail_errno("archive allocation");
+  }
 
   archive_read_support_filter_all(a);
   archive_read_support_format_all(a);
 
   if (archive_read_open(a, in, astream_open_cb, astream_read_cb,
-                        astream_close_cb) != ARCHIVE_OK)
+                        astream_close_cb) != ARCHIVE_OK) {
     fail_archive(a, "open nested archive");
+  }
 
   flags = disk_flags;
-  if (force)
+  if (force) {
     flags |= ARCHIVE_EXTRACT_UNLINK;
+  }
 
   archive_write_disk_set_options(disk, flags);
   archive_write_disk_set_standard_lookup(disk);
 
   cwd = getcwd(NULL, 0);
-  if (cwd == NULL)
+  if (cwd == NULL) {
     fail_errno("getcwd");
-  if (chdir(outdir) != 0)
+  }
+  if (chdir(outdir) != 0) {
     fail_errno("chdir(outdir)");
+  }
 
   for (;;) {
     r = archive_read_next_header(a, &e);
-    if (r == ARCHIVE_EOF)
+    if (r == ARCHIVE_EOF) {
       break;
-    if (r != ARCHIVE_OK)
+    }
+    if (r != ARCHIVE_OK) {
       fail_archive(a, "read nested header");
+    }
 
     r = archive_read_extract2(a, e, disk);
-    if (r != ARCHIVE_OK)
+    if (r != ARCHIVE_OK) {
       fail_archive(a, "extract nested entry");
+    }
   }
 
   archive_write_free(disk);
   archive_read_free(a);
 
-  if (chdir(cwd) != 0)
+  if (chdir(cwd) != 0) {
     fail_errno("chdir(cwd)");
+  }
   free(cwd);
 }
 
 static int should_be_treated_as_nested_archive(const char *path) {
-  if (path == NULL)
+  if (path == NULL) {
     return (0);
+  }
   const char *base = strrchr(path, '/');
   const char *name = base != NULL ? base + 1 : path;
   for (size_t i = 0; nested_archive_names[i] != NULL; i++) {
-    if (strcmp(name, nested_archive_names[i]) == 0)
+    if (strcmp(name, nested_archive_names[i]) == 0) {
       return (1);
+    }
   }
   return (0);
 }
@@ -287,14 +311,17 @@ static int should_be_treated_as_nested_archive(const char *path) {
 static int contains_dotdot_segment(const char *path) {
   const char *p = path;
   while (*p != '\0') {
-    while (*p == '/')
+    while (*p == '/') {
       p++;
+    }
     const char *seg = p;
-    while (*p != '\0' && *p != '/')
+    while (*p != '\0' && *p != '/') {
       p++;
+    }
     size_t len = (size_t)(p - seg);
-    if (len == 2 && seg[0] == '.' && seg[1] == '.')
+    if (len == 2 && seg[0] == '.' && seg[1] == '.') {
       return (1);
+    }
   }
   return (0);
 }
@@ -305,8 +332,9 @@ static char *normalize_rel_path(const char *path) {
     fprintf(stderr, "entry has empty pathname\n");
     exit(1);
   }
-  if (rel[0] == '.' && rel[1] == '/')
+  if (rel[0] == '.' && rel[1] == '/') {
     rel += 2;
+  }
   if (rel[0] == '\0') {
     fprintf(stderr, "entry has empty pathname\n");
     exit(1);
@@ -320,15 +348,17 @@ static char *normalize_rel_path(const char *path) {
     exit(1);
   }
   char *dup = strdup(rel);
-  if (dup == NULL)
+  if (dup == NULL) {
     fail_errno("strdup");
+  }
   return (dup);
 }
 
 static void mkdirs_for_path(const char *path) {
   char *tmp = strdup(path);
-  if (tmp == NULL)
+  if (tmp == NULL) {
     fail_errno("strdup");
+  }
   size_t len = strlen(tmp);
   while (len > 1 && tmp[len - 1] == '/') {
     tmp[len - 1] = '\0';
@@ -352,13 +382,15 @@ static void mkdirs_for_path(const char *path) {
 }
 
 static void ensure_outdir(const char *outdir, int force) {
-  if (outdir == NULL || outdir[0] == '\0')
+  if (outdir == NULL || outdir[0] == '\0') {
     fail_errno("invalid output directory");
+  }
   if (access(outdir, F_OK) == 0) {
     return;
   }
-  if (mkdir(outdir, 0755) != 0)
+  if (mkdir(outdir, 0755) != 0) {
     fail_errno("mkdir(outdir)");
+  }
 }
 
 int main(int argc, char **argv) {
@@ -413,31 +445,37 @@ int main(int argc, char **argv) {
   ensure_outdir(outdir, force);
 
   xar = archive_read_new();
-  if (xar == NULL)
+  if (xar == NULL) {
     fail_errno("archive_read_new");
+  }
 
   disk = archive_write_disk_new();
-  if (disk == NULL)
+  if (disk == NULL) {
     fail_errno("archive_write_disk_new");
+  }
 
   flags = disk_flags;
-  if (force)
+  if (force) {
     flags |= ARCHIVE_EXTRACT_UNLINK;
+  }
   archive_write_disk_set_options(disk, flags);
   archive_write_disk_set_standard_lookup(disk);
 
   archive_read_support_filter_all(xar);
   archive_read_support_format_xar(xar);
 
-  if (strcmp(xar_path, "-") == 0)
+  if (strcmp(xar_path, "-") == 0) {
     r = archive_read_open_fd(xar, 0, 10240);
-  else
+  } else {
     r = archive_read_open_filename(xar, xar_path, 10240);
-  if (r != ARCHIVE_OK)
+  }
+  if (r != ARCHIVE_OK) {
     fail_archive(xar, "open xar");
+  }
 
-  if (chdir(outdir) != 0)
+  if (chdir(outdir) != 0) {
     fail_errno("chdir(outdir)");
+  }
 
   while ((r = archive_read_next_header(xar, &e)) == ARCHIVE_OK) {
     const char *p = archive_entry_pathname(e);
