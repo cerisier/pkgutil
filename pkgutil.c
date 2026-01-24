@@ -45,8 +45,8 @@ static void usage(FILE *out) {
                "  --force, -f            Perform all operations without asking "
                "for confirmation\n\n"
                "File Commands:\n"
-               "  --expand PKG DIR       Expand the flat package PKG to DIR\n"
-               "  --expand-full PKG DIR  Expand the flat package PKG to DIR\n");
+               "  --expand PKG DIR       Write flat package entries to DIR\n"
+               "  --expand-full PKG DIR  Fully expand package contents to DIR\n");
 }
 
 static int pkg_getopt(int *argc, char ***argv, const char **arg) {
@@ -407,6 +407,51 @@ static int write_entry_to_file(struct archive *a, FILE *out) {
   return (r);
 }
 
+static char *make_output_path(const char *outdir, const char *path) {
+  const char *rel = path;
+  size_t outlen = strlen(outdir);
+  size_t rellen;
+  if (rel == NULL)
+    rel = "";
+  if (rel[0] == '.' && rel[1] == '/')
+    rel += 2;
+  rellen = strlen(rel);
+  if (rellen == 0) {
+    fprintf(stderr, "entry has empty pathname\n");
+    exit(1);
+  }
+  if (strchr(rel, '/') != NULL) {
+    fprintf(stderr, "entry pathname contains '/': %s\n", rel);
+    exit(1);
+  }
+  size_t need = outlen + 1 + rellen + 1;
+  char *full = (char *)malloc(need);
+  if (full == NULL)
+    fail_errno("malloc");
+  snprintf(full, need, "%s/%s", outdir, rel);
+  return (full);
+}
+
+static FILE *open_output_file(const char *outdir, const char *path, int force) {
+  char *full = make_output_path(outdir, path);
+  FILE *out;
+
+  if (!force && access(full, F_OK) == 0) {
+    fprintf(stderr, "%s: output exists (use --force to overwrite)\n", full);
+    free(full);
+    exit(1);
+  }
+
+  out = fopen(full, "wb");
+  if (out == NULL) {
+    free(full);
+    fail_errno("fopen(output)");
+  }
+
+  free(full);
+  return (out);
+}
+
 static void ensure_outdir(const char *outdir, int force) {
   if (outdir == NULL || outdir[0] == '\0')
     fail_errno("invalid output directory");
@@ -485,40 +530,78 @@ int main(int argc, char **argv) {
     FILE *tmp;
     int is_payload = is_payload_path(p);
 
-    tmp = tmpfile();
-    if (tmp == NULL)
-      fail_errno("tmpfile");
+    if (do_expand_full) {
+      tmp = tmpfile();
+      if (tmp == NULL)
+        fail_errno("tmpfile");
 
-    if (is_payload) {
-      struct astream in = {
-          .a = xar,
-          .blk = NULL,
-          .blksz = 0,
-          .pos = 0,
-          .off = 0,
-          .eof = 0,
-      };
+      if (is_payload) {
+        struct astream in = {
+            .a = xar,
+            .blk = NULL,
+            .blksz = 0,
+            .pos = 0,
+            .off = 0,
+            .eof = 0,
+        };
 
-      if (pbzx_deframe_to_file(&in, tmp) != ARCHIVE_OK) {
-        fprintf(stderr, "pbzx deframe failed\n");
-        fclose(tmp);
-        return (1);
+        if (pbzx_deframe_to_file(&in, tmp) != ARCHIVE_OK) {
+          fprintf(stderr, "pbzx deframe failed\n");
+          fclose(tmp);
+          return (1);
+        }
+      } else {
+        r = write_entry_to_file(xar, tmp);
+        if (r != ARCHIVE_OK) {
+          fclose(tmp);
+          fail_archive(xar, "read entry data");
+        }
       }
+
+      fflush(tmp);
+      rewind(tmp);
+      if (is_payload)
+        extract_cpio_xz_from_file(tmp, outdir, force);
+      else
+        extract_cpio_bzip2_from_file(tmp, outdir, force);
+      fclose(tmp);
     } else {
-      r = write_entry_to_file(xar, tmp);
-      if (r != ARCHIVE_OK) {
-        fclose(tmp);
-        fail_archive(xar, "read entry data");
+      if (archive_entry_filetype(e) == AE_IFDIR) {
+        char *full = make_output_path(outdir, p);
+        if (mkdir(full, 0755) != 0 && errno != EEXIST) {
+          free(full);
+          fail_errno("mkdir(entry)");
+        }
+        free(full);
+        continue;
       }
-    }
 
-    fflush(tmp);
-    rewind(tmp);
-    if (is_payload)
-      extract_cpio_xz_from_file(tmp, outdir, force);
-    else
-      extract_cpio_bzip2_from_file(tmp, outdir, force);
-    fclose(tmp);
+      tmp = open_output_file(outdir, p, force);
+      if (is_payload) {
+        struct astream in = {
+            .a = xar,
+            .blk = NULL,
+            .blksz = 0,
+            .pos = 0,
+            .off = 0,
+            .eof = 0,
+        };
+
+        if (pbzx_deframe_to_file(&in, tmp) != ARCHIVE_OK) {
+          fprintf(stderr, "pbzx deframe failed\n");
+          fclose(tmp);
+          return (1);
+        }
+      } else {
+        r = write_entry_to_file(xar, tmp);
+        if (r != ARCHIVE_OK) {
+          fclose(tmp);
+          fail_archive(xar, "read entry data");
+        }
+      }
+
+      fclose(tmp);
+    }
   }
 
   archive_read_free(xar);
