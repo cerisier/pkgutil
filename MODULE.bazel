@@ -8,15 +8,15 @@ module(
 bazel_dep(name = "libarchive", version = "3.8.1")
 bazel_dep(name = "rules_cc", version = "0.2.14")
 
-# libarchive_bsdtar_windows_crlf.patch
-# - tolerate mtree files with CRLF endings
-# - TODO: remove when https://github.com/libarchive/libarchive/pull/2717 is merged
-# libarchive_enable_xar_support.patch
+# 0001-libarchive_enable_xar_support.patch
 # - add libxml2 dependency and md5 support to enable xar support
+# 0002-feat-add-pbzx-read-filter-codex.patch
+# - add pbzx read filter support to libarchive
 single_version_override(
     module_name = "libarchive",
     patches = [
-        "//patches:libarchive_enable_xar_support.patch",
+        "//patches:0001-libarchive_enable_xar_support.patch",
+        "//patches:0002-feat-add-pbzx-read-filter.patch"
     ],
     patch_strip = 1,
 )
