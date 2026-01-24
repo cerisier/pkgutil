@@ -269,6 +269,60 @@ static void extract_cpio_from_stream(struct astream *in, const char *outdir,
   free(cwd);
 }
 
+static void extract_gzip_archive_from_stream(struct astream *in,
+                                             const char *outdir, int force) {
+  struct archive *a = archive_read_new();
+  struct archive *disk = archive_write_disk_new();
+  struct archive_entry *e;
+  int r;
+  int flags;
+  char *cwd = NULL;
+
+  if (a == NULL || disk == NULL)
+    fail_errno("archive allocation");
+
+  archive_read_support_filter_gzip(a);
+  archive_read_support_format_cpio(a);
+  archive_read_support_format_tar(a);
+
+  if (archive_read_open(a, in, astream_open_cb, astream_read_cb,
+                        astream_close_cb) != ARCHIVE_OK)
+    fail_archive(a, "open gzip archive");
+
+  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
+          ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
+          ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT;
+  if (force)
+    flags |= ARCHIVE_EXTRACT_UNLINK;
+
+  archive_write_disk_set_options(disk, flags);
+  archive_write_disk_set_standard_lookup(disk);
+
+  cwd = getcwd(NULL, 0);
+  if (cwd == NULL)
+    fail_errno("getcwd");
+  if (chdir(outdir) != 0)
+    fail_errno("chdir(outdir)");
+
+  for (;;) {
+    r = archive_read_next_header(a, &e);
+    if (r == ARCHIVE_EOF)
+      break;
+    if (r != ARCHIVE_OK)
+      fail_archive(a, "read nested header");
+    r = archive_read_extract2(a, e, disk);
+    if (r != ARCHIVE_OK)
+      fail_archive(a, "extract nested entry");
+  }
+
+  archive_write_free(disk);
+  archive_read_free(a);
+
+  if (chdir(cwd) != 0)
+    fail_errno("chdir(cwd)");
+  free(cwd);
+}
+
 static int is_payload_path(const char *path) {
   const char *base;
 
@@ -280,6 +334,21 @@ static int is_payload_path(const char *path) {
     return (1);
   base = strrchr(path, '/');
   if (base != NULL && strcmp(base + 1, "Payload") == 0)
+    return (1);
+  return (0);
+}
+
+static int is_scripts_path(const char *path) {
+  const char *base;
+
+  if (path == NULL)
+    return (0);
+  if (strcmp(path, "Scripts") == 0)
+    return (1);
+  if (path[0] == '.' && path[1] == '/' && strcmp(path + 2, "Scripts") == 0)
+    return (1);
+  base = strrchr(path, '/');
+  if (base != NULL && strcmp(base + 1, "Scripts") == 0)
     return (1);
   return (0);
 }
@@ -446,6 +515,7 @@ int main(int argc, char **argv) {
     const char *p = archive_entry_pathname(e);
     char *rel = normalize_rel_path(p);
     int is_payload = is_payload_path(rel);
+    int is_scripts = is_scripts_path(rel);
 
     if (do_expand_full && is_payload) {
       mkdirs_for_path(rel);
@@ -461,6 +531,22 @@ int main(int argc, char **argv) {
         };
 
         extract_cpio_from_stream(&in, rel, force);
+      }
+      free(rel);
+    } else if (do_expand_full && is_scripts) {
+      mkdirs_for_path(rel);
+
+      {
+        struct astream in = {
+            .a = xar,
+            .blk = NULL,
+            .blksz = 0,
+            .pos = 0,
+            .off = 0,
+            .eof = 0,
+        };
+
+        extract_gzip_archive_from_stream(&in, rel, force);
       }
       free(rel);
     } else {
