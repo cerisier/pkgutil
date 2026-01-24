@@ -295,6 +295,7 @@ static void extract_cpio_xz_from_file(FILE *xz, const char *outdir, int force) {
   struct archive_entry *e;
   int r;
   int flags;
+  char *cwd = NULL;
 
   if (a == NULL || disk == NULL)
     fail_errno("archive allocation");
@@ -314,6 +315,9 @@ static void extract_cpio_xz_from_file(FILE *xz, const char *outdir, int force) {
   archive_write_disk_set_options(disk, flags);
   archive_write_disk_set_standard_lookup(disk);
 
+  cwd = getcwd(NULL, 0);
+  if (cwd == NULL)
+    fail_errno("getcwd");
   if (chdir(outdir) != 0)
     fail_errno("chdir(outdir)");
 
@@ -331,6 +335,10 @@ static void extract_cpio_xz_from_file(FILE *xz, const char *outdir, int force) {
 
   archive_write_free(disk);
   archive_read_free(a);
+
+  if (chdir(cwd) != 0)
+    fail_errno("chdir(cwd)");
+  free(cwd);
 }
 
 static int is_payload_path(const char *path) {
@@ -348,64 +356,71 @@ static int is_payload_path(const char *path) {
   return (0);
 }
 
-static int write_entry_to_file(struct archive *a, FILE *out) {
-  const void *buf;
-  size_t size;
-  la_int64_t offset;
-  int r;
-
-  while ((r = archive_read_data_block(a, &buf, &size, &offset)) == ARCHIVE_OK) {
-    if (size > 0 && fwrite(buf, 1, size, out) != size)
-      return (ARCHIVE_FATAL);
+static int contains_dotdot_segment(const char *path) {
+  const char *p = path;
+  while (*p != '\0') {
+    while (*p == '/')
+      p++;
+    const char *seg = p;
+    while (*p != '\0' && *p != '/')
+      p++;
+    size_t len = (size_t)(p - seg);
+    if (len == 2 && seg[0] == '.' && seg[1] == '.')
+      return (1);
   }
-  if (r == ARCHIVE_EOF)
-    return (ARCHIVE_OK);
-  return (r);
+  return (0);
 }
 
-static char *make_output_path(const char *outdir, const char *path) {
+static char *normalize_rel_path(const char *path) {
   const char *rel = path;
-  size_t outlen = strlen(outdir);
-  size_t rellen;
-  if (rel == NULL)
-    rel = "";
-  if (rel[0] == '.' && rel[1] == '/')
-    rel += 2;
-  rellen = strlen(rel);
-  if (rellen == 0) {
+  if (rel == NULL) {
     fprintf(stderr, "entry has empty pathname\n");
     exit(1);
   }
-  if (strchr(rel, '/') != NULL) {
-    fprintf(stderr, "entry pathname contains '/': %s\n", rel);
+  if (rel[0] == '.' && rel[1] == '/')
+    rel += 2;
+  if (rel[0] == '\0') {
+    fprintf(stderr, "entry has empty pathname\n");
     exit(1);
   }
-  size_t need = outlen + 1 + rellen + 1;
-  char *full = (char *)malloc(need);
-  if (full == NULL)
-    fail_errno("malloc");
-  snprintf(full, need, "%s/%s", outdir, rel);
-  return (full);
+  if (rel[0] == '/') {
+    fprintf(stderr, "entry pathname is absolute: %s\n", rel);
+    exit(1);
+  }
+  if (contains_dotdot_segment(rel)) {
+    fprintf(stderr, "entry pathname contains '..': %s\n", rel);
+    exit(1);
+  }
+  char *dup = strdup(rel);
+  if (dup == NULL)
+    fail_errno("strdup");
+  return (dup);
 }
 
-static FILE *open_output_file(const char *outdir, const char *path, int force) {
-  char *full = make_output_path(outdir, path);
-  FILE *out;
-
-  if (!force && access(full, F_OK) == 0) {
-    fprintf(stderr, "%s: output exists (use --force to overwrite)\n", full);
-    free(full);
-    exit(1);
+static void mkdirs_for_path(const char *path) {
+  char *tmp = strdup(path);
+  if (tmp == NULL)
+    fail_errno("strdup");
+  size_t len = strlen(tmp);
+  while (len > 1 && tmp[len - 1] == '/') {
+    tmp[len - 1] = '\0';
+    len--;
   }
-
-  out = fopen(full, "wb");
-  if (out == NULL) {
-    free(full);
-    fail_errno("fopen(output)");
+  for (char *p = tmp + 1; *p != '\0'; p++) {
+    if (*p == '/') {
+      *p = '\0';
+      if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+        free(tmp);
+        fail_errno("mkdir(parent)");
+      }
+      *p = '/';
+    }
   }
-
-  free(full);
-  return (out);
+  if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+    free(tmp);
+    fail_errno("mkdir(path)");
+  }
+  free(tmp);
 }
 
 static void ensure_outdir(const char *outdir, int force) {
@@ -422,6 +437,7 @@ int main(int argc, char **argv) {
   const char *xar_path = NULL;
   const char *outdir = NULL;
   struct archive *xar;
+  struct archive *disk;
   struct archive_entry *e;
   int r;
   int opt;
@@ -429,6 +445,7 @@ int main(int argc, char **argv) {
   int force = 0;
   int do_expand = 0;
   int do_expand_full = 0;
+  int flags;
 
   while ((opt = pkg_getopt(&argc, &argv, &arg)) != -1) {
     switch (opt) {
@@ -471,6 +488,19 @@ int main(int argc, char **argv) {
   if (xar == NULL)
     fail_errno("archive_read_new");
 
+  disk = archive_write_disk_new();
+  if (disk == NULL)
+    fail_errno("archive_write_disk_new");
+
+  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
+          ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
+          ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+          ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
+  if (force)
+    flags |= ARCHIVE_EXTRACT_UNLINK;
+  archive_write_disk_set_options(disk, flags);
+  archive_write_disk_set_standard_lookup(disk);
+
   archive_read_support_filter_all(xar);
   archive_read_support_format_xar(xar);
 
@@ -481,17 +511,17 @@ int main(int argc, char **argv) {
   if (r != ARCHIVE_OK)
     fail_archive(xar, "open xar");
 
+  if (chdir(outdir) != 0)
+    fail_errno("chdir(outdir)");
+
   while ((r = archive_read_next_header(xar, &e)) == ARCHIVE_OK) {
     const char *p = archive_entry_pathname(e);
     FILE *tmp;
-    int is_payload = is_payload_path(p);
+    char *rel = normalize_rel_path(p);
+    int is_payload = is_payload_path(rel);
 
     if (do_expand_full && is_payload) {
-      char *payload_dir = make_output_path(outdir, p);
-      if (mkdir(payload_dir, 0755) != 0 && errno != EEXIST) {
-        free(payload_dir);
-        fail_errno("mkdir(payload)");
-      }
+      mkdirs_for_path(rel);
 
       tmp = tmpfile();
       if (tmp == NULL)
@@ -510,36 +540,28 @@ int main(int argc, char **argv) {
         if (pbzx_deframe_to_file(&in, tmp) != ARCHIVE_OK) {
           fprintf(stderr, "pbzx deframe failed\n");
           fclose(tmp);
+          free(rel);
           return (1);
         }
       }
 
       fflush(tmp);
       rewind(tmp);
-      extract_cpio_xz_from_file(tmp, payload_dir, force);
+      extract_cpio_xz_from_file(tmp, rel, force);
       fclose(tmp);
-      free(payload_dir);
+      free(rel);
     } else {
-      if (archive_entry_filetype(e) == AE_IFDIR) {
-        char *full = make_output_path(outdir, p);
-        if (mkdir(full, 0755) != 0 && errno != EEXIST) {
-          free(full);
-          fail_errno("mkdir(entry)");
-        }
-        free(full);
-        continue;
-      }
-
-      tmp = open_output_file(outdir, p, force);
-      r = write_entry_to_file(xar, tmp);
+      archive_entry_set_pathname(e, rel);
+      r = archive_read_extract2(xar, e, disk);
       if (r != ARCHIVE_OK) {
-        fclose(tmp);
-        fail_archive(xar, "read entry data");
+        free(rel);
+        fail_archive(xar, "extract entry");
       }
-      fclose(tmp);
+      free(rel);
     }
   }
 
+  archive_write_free(disk);
   archive_read_free(xar);
   return (0);
 }
