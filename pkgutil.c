@@ -14,6 +14,8 @@
 
 static const char *short_options = "EfhvX";
 
+static const char *nested_archive_names[] = {"Payload", "Scripts", NULL};
+
 static const struct option {
   const char *name;
   int required;
@@ -268,33 +270,15 @@ static void extract_nested_archive_from_stream(struct astream *in,
   free(cwd);
 }
 
-static int is_payload_path(const char *path) {
-  const char *base;
-
+static int should_be_treated_as_nested_archive(const char *path) {
   if (path == NULL)
     return (0);
-  if (strcmp(path, "Payload") == 0)
-    return (1);
-  if (path[0] == '.' && path[1] == '/' && strcmp(path + 2, "Payload") == 0)
-    return (1);
-  base = strrchr(path, '/');
-  if (base != NULL && strcmp(base + 1, "Payload") == 0)
-    return (1);
-  return (0);
-}
-
-static int is_scripts_path(const char *path) {
-  const char *base;
-
-  if (path == NULL)
-    return (0);
-  if (strcmp(path, "Scripts") == 0)
-    return (1);
-  if (path[0] == '.' && path[1] == '/' && strcmp(path + 2, "Scripts") == 0)
-    return (1);
-  base = strrchr(path, '/');
-  if (base != NULL && strcmp(base + 1, "Scripts") == 0)
-    return (1);
+  const char *base = strrchr(path, '/');
+  const char *name = base != NULL ? base + 1 : path;
+  for (size_t i = 0; nested_archive_names[i] != NULL; i++) {
+    if (strcmp(name, nested_archive_names[i]) == 0)
+      return (1);
+  }
   return (0);
 }
 
@@ -459,10 +443,9 @@ int main(int argc, char **argv) {
   while ((r = archive_read_next_header(xar, &e)) == ARCHIVE_OK) {
     const char *p = archive_entry_pathname(e);
     char *rel = normalize_rel_path(p);
-    int is_payload = is_payload_path(rel);
-    int is_scripts = is_scripts_path(rel);
+    int is_nested = should_be_treated_as_nested_archive(rel);
 
-    if (do_expand_full && (is_payload || is_scripts)) {
+    if (do_expand_full && is_nested) {
       mkdirs_for_path(rel);
 
       {
