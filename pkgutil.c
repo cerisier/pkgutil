@@ -14,23 +14,21 @@
 
 static const char *short_options = "EfhvX";
 
-static const char *nested_archive_names[] = {"Payload", "Scripts", NULL};
+static const char *const nested_archive_names[] = {"Payload", "Scripts", NULL};
 
-static const char disk_flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
-  ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
-  ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
-  ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
+static const int disk_flags =
+    ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
+    ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
+    ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+    ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
 
 static const struct option {
   const char *name;
   int required;
   int equivalent;
-} pkg_longopts[] = {{"expand", 0, 'X'},
-                    {"expand-full", 0, 'E'},
-                    {"force", 0, 'f'},
-                    {"help", 0, 'h'},
-                    {"verbose", 0, 'v'},
-                    {NULL, 0, 0}};
+} pkg_longopts[] = {{"expand", 0, 'X'},  {"expand-full", 0, 'E'},
+                    {"force", 0, 'f'},   {"help", 0, 'h'},
+                    {"verbose", 0, 'v'}, {NULL, 0, 0}};
 
 static void fail_archive(struct archive *a, const char *ctx) {
   fprintf(stderr, "%s: %s\n", ctx,
@@ -44,16 +42,17 @@ static void fail_errno(const char *ctx) {
 }
 
 static void usage(FILE *out) {
-  fprintf(out, "Usage: pkgutil [OPTIONS] [COMMANDS] ...\n\n"
-               "Options:\n"
-               "  --help                 Show this usage guide\n"
-               "  --verbose, -v          Show contextual information and "
-               "format for easy reading\n"
-               "  --force, -f            Perform all operations without asking "
-               "for confirmation\n\n"
-               "File Commands:\n"
-               "  --expand PKG DIR       Write flat package entries to DIR\n"
-               "  --expand-full PKG DIR  Fully expand package contents to DIR\n");
+  fprintf(out,
+          "Usage: pkgutil [OPTIONS] [COMMANDS] ...\n\n"
+          "Options:\n"
+          "  --help                 Show this usage guide\n"
+          "  --verbose, -v          Show contextual information and "
+          "format for easy reading\n"
+          "  --force, -f            Perform all operations without asking "
+          "for confirmation\n\n"
+          "File Commands:\n"
+          "  --expand PKG DIR       Write flat package entries to DIR\n"
+          "  --expand-full PKG DIR  Fully expand package contents to DIR\n");
 }
 
 static int pkg_getopt(int *argc, char ***argv, const char **arg) {
@@ -258,7 +257,7 @@ static void extract_nested_archive_from_stream(struct astream *in,
     if (r == ARCHIVE_EOF)
       break;
     if (r != ARCHIVE_OK)
-    fail_archive(a, "read nested header");
+      fail_archive(a, "read nested header");
 
     r = archive_read_extract2(a, e, disk);
     if (r != ARCHIVE_OK)
