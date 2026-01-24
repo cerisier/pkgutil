@@ -181,115 +181,41 @@ static int astream_fill(struct astream *s) {
   return (ARCHIVE_OK);
 }
 
-static int astream_read(struct astream *s, void *out, size_t n) {
-  unsigned char *p = (unsigned char *)out;
-  while (n > 0) {
-    if (s->blk == NULL || s->pos == s->blksz) {
-      int r = astream_fill(s);
-      if (r != ARCHIVE_OK)
-        return (r);
-    }
-    if (s->eof)
-      return (ARCHIVE_EOF);
-    size_t avail = s->blksz - s->pos;
-    size_t take = (avail < n) ? avail : n;
-    memcpy(p, s->blk + s->pos, take);
-    s->pos += take;
-    p += take;
-    n -= take;
-  }
+static int astream_open_cb(struct archive *a, void *client_data) {
+  (void)a;
+  (void)client_data;
   return (ARCHIVE_OK);
 }
 
-static int read_exact(struct astream *s, void *out, size_t n) {
-  int r = astream_read(s, out, n);
-  return (r);
+static la_ssize_t astream_read_cb(struct archive *a, void *client_data,
+                                  const void **buff) {
+  struct astream *s = (struct astream *)client_data;
+  if (s->eof)
+    return (0);
+  if (s->blk == NULL || s->pos == s->blksz) {
+    int r = astream_fill(s);
+    if (r == ARCHIVE_EOF)
+      return (0);
+    if (r != ARCHIVE_OK) {
+      archive_set_error(a, archive_errno(s->a), "%s",
+                        archive_error_string(s->a));
+      return (-1);
+    }
+  }
+  *buff = s->blk + s->pos;
+  size_t avail = s->blksz - s->pos;
+  s->pos = s->blksz;
+  return ((la_ssize_t)avail);
 }
 
-static int read_u64_be(struct astream *s, uint64_t *v) {
-  uint64_t tmp;
-  int r = read_exact(s, &tmp, sizeof(tmp));
-  if (r != ARCHIVE_OK)
-    return (r);
-  *v = __builtin_bswap64(tmp);
+static int astream_close_cb(struct archive *a, void *client_data) {
+  (void)a;
+  (void)client_data;
   return (ARCHIVE_OK);
 }
 
-/*
- * Parse pbzx framing and write concatenated XZ streams to out.
- * This does not decompress.
- */
-static int pbzx_deframe_to_file(struct astream *in, FILE *out) {
-  unsigned char magic[4];
-  uint64_t flags = 0;
-  uint64_t length = 0;
-
-  if (read_exact(in, magic, sizeof(magic)) != ARCHIVE_OK)
-    return (ARCHIVE_FATAL);
-  if (memcmp(magic, "pbzx", 4) != 0) {
-    fprintf(stderr, "Not a pbzx stream\n");
-    return (ARCHIVE_FATAL);
-  }
-
-  if (read_u64_be(in, &flags) != ARCHIVE_OK)
-    return (ARCHIVE_FATAL);
-
-  while (flags & (1ULL << 24)) {
-    if (read_u64_be(in, &flags) != ARCHIVE_OK)
-      return (ARCHIVE_FATAL);
-    if (read_u64_be(in, &length) != ARCHIVE_OK)
-      return (ARCHIVE_FATAL);
-
-    unsigned char hdr[6];
-    if (read_exact(in, hdr, sizeof(hdr)) != ARCHIVE_OK)
-      return (ARCHIVE_FATAL);
-    if (memcmp(hdr,
-               "\xFD"
-               "7zXZ\0",
-               6) != 0) {
-      fprintf(stderr, "Header is not <FD>7zXZ<00>\n");
-      return (ARCHIVE_FATAL);
-    }
-    if (fwrite(hdr, 1, sizeof(hdr), out) != sizeof(hdr))
-      return (ARCHIVE_FATAL);
-
-    if (length < sizeof(hdr)) {
-      fprintf(stderr, "pbzx chunk length too small\n");
-      return (ARCHIVE_FATAL);
-    }
-
-    uint64_t remaining = length - sizeof(hdr);
-    unsigned char buf[BSIZE];
-    unsigned char tail[2] = {0, 0};
-
-    while (remaining > 0) {
-      size_t want = (remaining < sizeof(buf)) ? (size_t)remaining : sizeof(buf);
-      if (read_exact(in, buf, want) != ARCHIVE_OK)
-        return (ARCHIVE_FATAL);
-
-      if (want >= 2) {
-        tail[0] = buf[want - 2];
-        tail[1] = buf[want - 1];
-      } else if (want == 1) {
-        tail[0] = tail[1];
-        tail[1] = buf[0];
-      }
-
-      if (fwrite(buf, 1, want, out) != want)
-        return (ARCHIVE_FATAL);
-      remaining -= want;
-    }
-
-    if (!(tail[0] == 'Y' && tail[1] == 'Z')) {
-      fprintf(stderr, "Footer is not YZ\n");
-      return (ARCHIVE_FATAL);
-    }
-  }
-
-  return (ARCHIVE_OK);
-}
-
-static void extract_cpio_xz_from_file(FILE *xz, const char *outdir, int force) {
+static void extract_cpio_xz_from_stream(struct astream *in,
+                                        const char *outdir, int force) {
   struct archive *a = archive_read_new();
   struct archive *disk = archive_write_disk_new();
   struct archive_entry *e;
@@ -300,11 +226,13 @@ static void extract_cpio_xz_from_file(FILE *xz, const char *outdir, int force) {
   if (a == NULL || disk == NULL)
     fail_errno("archive allocation");
 
+  archive_read_support_filter_pbzx(a);
   archive_read_support_filter_xz(a);
   archive_read_support_format_cpio(a);
 
-  if (archive_read_open_FILE(a, xz) != ARCHIVE_OK)
-    fail_archive(a, "open transformed stream 1");
+  if (archive_read_open(a, in, astream_open_cb, astream_read_cb,
+                        astream_close_cb) != ARCHIVE_OK)
+    fail_archive(a, "open pbzx payload");
 
   flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
           ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
@@ -516,16 +444,11 @@ int main(int argc, char **argv) {
 
   while ((r = archive_read_next_header(xar, &e)) == ARCHIVE_OK) {
     const char *p = archive_entry_pathname(e);
-    FILE *tmp;
     char *rel = normalize_rel_path(p);
     int is_payload = is_payload_path(rel);
 
     if (do_expand_full && is_payload) {
       mkdirs_for_path(rel);
-
-      tmp = tmpfile();
-      if (tmp == NULL)
-        fail_errno("tmpfile");
 
       {
         struct astream in = {
@@ -537,18 +460,8 @@ int main(int argc, char **argv) {
             .eof = 0,
         };
 
-        if (pbzx_deframe_to_file(&in, tmp) != ARCHIVE_OK) {
-          fprintf(stderr, "pbzx deframe failed\n");
-          fclose(tmp);
-          free(rel);
-          return (1);
-        }
+        extract_cpio_xz_from_stream(&in, rel, force);
       }
-
-      fflush(tmp);
-      rewind(tmp);
-      extract_cpio_xz_from_file(tmp, rel, force);
-      fclose(tmp);
       free(rel);
     } else {
       archive_entry_set_pathname(e, rel);
