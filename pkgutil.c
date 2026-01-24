@@ -214,8 +214,8 @@ static int astream_close_cb(struct archive *a, void *client_data) {
   return (ARCHIVE_OK);
 }
 
-static void extract_cpio_xz_from_stream(struct astream *in,
-                                        const char *outdir, int force) {
+static void extract_cpio_from_stream(struct astream *in, const char *outdir,
+                                     int force) {
   struct archive *a = archive_read_new();
   struct archive *disk = archive_write_disk_new();
   struct archive_entry *e;
@@ -226,13 +226,13 @@ static void extract_cpio_xz_from_stream(struct astream *in,
   if (a == NULL || disk == NULL)
     fail_errno("archive allocation");
 
+  archive_read_support_filter_all(a);
   archive_read_support_filter_pbzx(a);
-  archive_read_support_filter_xz(a);
   archive_read_support_format_cpio(a);
 
   if (archive_read_open(a, in, astream_open_cb, astream_read_cb,
                         astream_close_cb) != ARCHIVE_OK)
-    fail_archive(a, "open pbzx payload");
+    fail_archive(a, "open payload");
 
   flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
           ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
@@ -460,7 +460,7 @@ int main(int argc, char **argv) {
             .eof = 0,
         };
 
-        extract_cpio_xz_from_stream(&in, rel, force);
+        extract_cpio_from_stream(&in, rel, force);
       }
       free(rel);
     } else {
