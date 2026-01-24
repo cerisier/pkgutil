@@ -16,6 +16,11 @@ static const char *short_options = "EfhvX";
 
 static const char *nested_archive_names[] = {"Payload", "Scripts", NULL};
 
+static const char disk_flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
+  ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
+  ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+  ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
+
 static const struct option {
   const char *name;
   int required;
@@ -235,9 +240,7 @@ static void extract_nested_archive_from_stream(struct astream *in,
                         astream_close_cb) != ARCHIVE_OK)
     fail_archive(a, "open nested archive");
 
-  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
-          ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
-          ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT;
+  flags = disk_flags;
   if (force)
     flags |= ARCHIVE_EXTRACT_UNLINK;
 
@@ -418,10 +421,7 @@ int main(int argc, char **argv) {
   if (disk == NULL)
     fail_errno("archive_write_disk_new");
 
-  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
-          ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
-          ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
-          ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
+  flags = disk_flags;
   if (force)
     flags |= ARCHIVE_EXTRACT_UNLINK;
   archive_write_disk_set_options(disk, flags);
