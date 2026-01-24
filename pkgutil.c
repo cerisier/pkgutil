@@ -487,6 +487,12 @@ int main(int argc, char **argv) {
     int is_payload = is_payload_path(p);
 
     if (do_expand_full && is_payload) {
+      char *payload_dir = make_output_path(outdir, p);
+      if (mkdir(payload_dir, 0755) != 0 && errno != EEXIST) {
+        free(payload_dir);
+        fail_errno("mkdir(payload)");
+      }
+
       tmp = tmpfile();
       if (tmp == NULL)
         fail_errno("tmpfile");
@@ -510,8 +516,9 @@ int main(int argc, char **argv) {
 
       fflush(tmp);
       rewind(tmp);
-      extract_cpio_xz_from_file(tmp, outdir, force);
+      extract_cpio_xz_from_file(tmp, payload_dir, force);
       fclose(tmp);
+      free(payload_dir);
     } else {
       if (archive_entry_filetype(e) == AE_IFDIR) {
         char *full = make_output_path(outdir, p);
