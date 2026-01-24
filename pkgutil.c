@@ -333,50 +333,6 @@ static void extract_cpio_xz_from_file(FILE *xz, const char *outdir, int force) {
   archive_read_free(a);
 }
 
-static void extract_cpio_bzip2_from_file(FILE *bz, const char *outdir,
-                                         int force) {
-  struct archive *a = archive_read_new();
-  struct archive *disk = archive_write_disk_new();
-  struct archive_entry *e;
-  int r;
-  int flags;
-
-  if (a == NULL || disk == NULL)
-    fail_errno("archive allocation");
-
-  archive_read_support_filter_bzip2(a);
-
-  if (archive_read_open_FILE(a, bz) != ARCHIVE_OK)
-    fail_archive(a, "open transformed stream 2");
-
-  flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
-          ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
-          ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT;
-  if (force)
-    flags |= ARCHIVE_EXTRACT_UNLINK;
-
-  archive_write_disk_set_options(disk, flags);
-  archive_write_disk_set_standard_lookup(disk);
-
-  if (chdir(outdir) != 0)
-    fail_errno("chdir(outdir)");
-
-  for (;;) {
-    r = archive_read_next_header(a, &e);
-    if (r == ARCHIVE_EOF)
-      break;
-    if (r != ARCHIVE_OK)
-      fail_archive(a, "read cpio header");
-
-	  r = archive_read_extract2(a, e, disk);
-    if (r != ARCHIVE_OK)
-      fail_archive(a, "extract entry");
-  }
-
-  archive_write_free(disk);
-  archive_read_free(a);
-}
-
 static int is_payload_path(const char *path) {
   const char *base;
 
@@ -530,12 +486,12 @@ int main(int argc, char **argv) {
     FILE *tmp;
     int is_payload = is_payload_path(p);
 
-    if (do_expand_full) {
+    if (do_expand_full && is_payload) {
       tmp = tmpfile();
       if (tmp == NULL)
         fail_errno("tmpfile");
 
-      if (is_payload) {
+      {
         struct astream in = {
             .a = xar,
             .blk = NULL,
@@ -550,20 +506,11 @@ int main(int argc, char **argv) {
           fclose(tmp);
           return (1);
         }
-      } else {
-        r = write_entry_to_file(xar, tmp);
-        if (r != ARCHIVE_OK) {
-          fclose(tmp);
-          fail_archive(xar, "read entry data");
-        }
       }
 
       fflush(tmp);
       rewind(tmp);
-      if (is_payload)
-        extract_cpio_xz_from_file(tmp, outdir, force);
-      else
-        extract_cpio_bzip2_from_file(tmp, outdir, force);
+      extract_cpio_xz_from_file(tmp, outdir, force);
       fclose(tmp);
     } else {
       if (archive_entry_filetype(e) == AE_IFDIR) {
@@ -577,29 +524,11 @@ int main(int argc, char **argv) {
       }
 
       tmp = open_output_file(outdir, p, force);
-      if (is_payload) {
-        struct astream in = {
-            .a = xar,
-            .blk = NULL,
-            .blksz = 0,
-            .pos = 0,
-            .off = 0,
-            .eof = 0,
-        };
-
-        if (pbzx_deframe_to_file(&in, tmp) != ARCHIVE_OK) {
-          fprintf(stderr, "pbzx deframe failed\n");
-          fclose(tmp);
-          return (1);
-        }
-      } else {
-        r = write_entry_to_file(xar, tmp);
-        if (r != ARCHIVE_OK) {
-          fclose(tmp);
-          fail_archive(xar, "read entry data");
-        }
+      r = write_entry_to_file(xar, tmp);
+      if (r != ARCHIVE_OK) {
+        fclose(tmp);
+        fail_archive(xar, "read entry data");
       }
-
       fclose(tmp);
     }
   }
