@@ -2,9 +2,21 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 
 package(default_visibility = ["//visibility:public"])
 
+config_setting(
+    name = "is_windows_clang_mingw",
+    constraint_values = ["@platforms//os:windows"],
+    flag_values = {"@rules_cc//cc/compiler:compiler": "clang"},
+)
+
 cc_binary(
     name = "pkgutil",
     srcs = ["pkgutil.c"],
+    linkopts = select({
+        ":is_windows_clang_mingw": [
+            "-lbcrypt",
+        ],
+        "//conditions:default": [],
+    }),
     deps = [
         "@libarchive//libarchive",
     ],

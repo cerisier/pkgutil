@@ -10,6 +10,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if (defined(_WIN32) || defined(__WIN32__))
+#include <direct.h> /* _mkdir */
+#define mkdir(x, y) _mkdir(x)
+#endif
+
 #define BSIZE (8 * 1024)
 
 static const char *short_options = "EfhvX";

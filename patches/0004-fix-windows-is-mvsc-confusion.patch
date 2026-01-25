@@ -1,0 +1,25 @@
+From ea7ff56aee3e1750bf6895982f8c12b2a8ce0528 Mon Sep 17 00:00:00 2001
+From: Corentin Kerisit <corentin.kerisit@gmail.com>
+Date: Mon, 26 Jan 2026 18:51:46 +0100
+Subject: [PATCH] fix windows is mvsc confusion
+
+---
+ BUILD.bazel | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/BUILD.bazel b/BUILD.bazel
+index 81d2137f..6e21b5dc 100644
+--- a/BUILD.bazel
++++ b/BUILD.bazel
+@@ -74,7 +74,7 @@ cc_library(
+     includes = ["include"],
+     linkopts = select({
+         "@platforms//os:windows": [
+-            "bcrypt.lib",
++            # "bcrypt.lib",
+         ],
+         "//conditions:default": [
+             "-lm",
+-- 
+2.52.0
+
