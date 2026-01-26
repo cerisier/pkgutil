@@ -36,7 +36,6 @@ cc_binary(
         binary = ":pkgutil",
         tags = ["no-remote"] if platform == "@toolchains_llvm_bootstrapped//platforms:macos_arm64" else [],
         target_platform = platform,
-        tags = ["manual"],
     )
     for platform in PLATFORMS
 ]
