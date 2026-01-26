@@ -6,6 +6,9 @@ on:
 
   pull_request:
   workflow_call:
+    secrets:
+      BUILDBUDDY_API_KEY:
+        required: true
     outputs:
       artifacts:
         description: "All binaries"
