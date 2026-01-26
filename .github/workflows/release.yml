@@ -23,8 +23,16 @@ jobs:
         with:
           merge-multiple: true
       - run: shasum -a 256 pkgutil* > SHA256.txt
-      - uses: softprops/action-gh-release@v2
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: |
             pkgutil*
             SHA256.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
