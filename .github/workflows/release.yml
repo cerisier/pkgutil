@@ -5,6 +5,11 @@ on:
     tags:
       - "v*.*.*"
 
+permissions:
+  id-token: write
+  contents: read
+  attestations: write
+
 jobs:
   build_all:
     uses: ./.github/workflows/build.yaml
