@@ -39,7 +39,6 @@ jobs:
 
           # tar.gz the binaries
           tar -czf pkgutil_macos_arm64.tar.gz pkgutil_macos_arm64
-          tar -czf pkgutil_macos_amd64.tar.gz pkgutil_macos_amd64
           tar -czf pkgutil_linux_arm64_musl.tar.gz pkgutil_linux_arm64_musl
           tar -czf pkgutil_linux_amd64_musl.tar.gz pkgutil_linux_amd64_musl
           tar -czf pkgutil_windows_amd64.tar.gz pkgutil_windows_amd64.exe
