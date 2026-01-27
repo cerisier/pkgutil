@@ -23,17 +23,33 @@ static const char *const nested_archive_names[] = {"Payload", "Scripts", NULL};
 
 static const int disk_flags =
     ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
-    ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS |
+    ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS | ARCHIVE_EXTRACT_OWNER |
     ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
     ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
+
+enum {
+  opt_include = 256,
+  opt_exclude,
+  opt_strip_components,
+  opt_no_same_owner,
+  opt_no_same_permissions,
+};
 
 static const struct option {
   const char *name;
   int required;
   int equivalent;
-} pkg_longopts[] = {{"expand", 0, 'X'},  {"expand-full", 0, 'E'},
-                    {"force", 0, 'f'},   {"help", 0, 'h'},
-                    {"verbose", 0, 'v'}, {NULL, 0, 0}};
+} pkg_longopts[] = {{"expand", 0, 'X'},
+                    {"expand-full", 0, 'E'},
+                    {"force", 0, 'f'},
+                    {"help", 0, 'h'},
+                    {"include", 1, opt_include},
+                    {"exclude", 1, opt_exclude},
+                    {"strip-components", 1, opt_strip_components},
+                    {"no-same-owner", 0, opt_no_same_owner},
+                    {"no-same-permissions", 0, opt_no_same_permissions},
+                    {"verbose", 0, 'v'},
+                    {NULL, 0, 0}};
 
 static void fail_archive(struct archive *a, const char *ctx) {
   fprintf(stderr, "%s: %s\n", ctx,
@@ -54,11 +70,19 @@ static void usage(FILE *out) {
           "  --verbose, -v          Show contextual information and "
           "format for easy reading\n"
           "  --force, -f            Perform all operations without asking "
-          "for confirmation\n\n"
+          "for confirmation\n"
+          "  --include PATTERN      Only include paths matching PATTERN\n"
+          "  --exclude PATTERN      Exclude paths matching PATTERN\n"
+          "  --strip-components N   Strip N leading path components\n"
+          "  --no-same-owner        Do not preserve ownership\n"
+          "  --no-same-permissions  Do not preserve permissions\n\n"
           "File Commands:\n"
           "  --expand PKG DIR       Write flat package entries to DIR\n"
           "  --expand-full PKG DIR  Fully expand package contents to DIR\n");
 }
+
+static char *strip_components_path(const char *path, int strip);
+static int apply_strip_components(struct archive_entry *e, int strip);
 
 static int pkg_getopt(int *argc, char ***argv, const char **arg) {
   enum { state_start = 0, state_next_word, state_short, state_long };
@@ -239,12 +263,13 @@ static int astream_close_cb(struct archive *a, void *client_data) {
 }
 
 static void extract_nested_archive_from_stream(struct astream *in,
-                                               const char *outdir, int force) {
+                                               const char *outdir, int flags,
+                                               struct archive *match,
+                                               int strip_components) {
   struct archive *a = archive_read_new();
   struct archive *disk = archive_write_disk_new();
   struct archive_entry *e;
   int r;
-  int flags;
   char *cwd = NULL;
 
   if (a == NULL || disk == NULL) {
@@ -257,11 +282,6 @@ static void extract_nested_archive_from_stream(struct astream *in,
   if (archive_read_open(a, in, astream_open_cb, astream_read_cb,
                         astream_close_cb) != ARCHIVE_OK) {
     fail_archive(a, "open nested archive");
-  }
-
-  flags = disk_flags;
-  if (force) {
-    flags |= ARCHIVE_EXTRACT_UNLINK;
   }
 
   archive_write_disk_set_options(disk, flags);
@@ -282,6 +302,19 @@ static void extract_nested_archive_from_stream(struct astream *in,
     }
     if (r != ARCHIVE_OK) {
       fail_archive(a, "read nested header");
+    }
+
+    if (match != NULL) {
+      r = archive_match_excluded(match, e);
+      if (r != 0) {
+        archive_read_data_skip(a);
+        continue;
+      }
+    }
+
+    if (apply_strip_components(e, strip_components)) {
+      archive_read_data_skip(a);
+      continue;
     }
 
     r = archive_read_extract2(a, e, disk);
@@ -309,6 +342,80 @@ static int should_be_treated_as_nested_archive(const char *path) {
     if (strcmp(name, nested_archive_names[i]) == 0) {
       return (1);
     }
+  }
+  return (0);
+}
+
+static char *strip_components_path(const char *path, int strip) {
+  const char *p = path;
+  int remaining = strip;
+
+  if (p == NULL) {
+    return (NULL);
+  }
+  if (strip <= 0) {
+    char *dup = strdup(p);
+    if (dup == NULL) {
+      fail_errno("strdup");
+    }
+    return (dup);
+  }
+
+  while (remaining > 0) {
+    switch (*p++) {
+    case '/':
+#if defined(_WIN32) && !defined(__CYGWIN__)
+    case '\\':
+#endif
+      remaining--;
+      break;
+    case '\0':
+      return (NULL);
+    }
+  }
+
+  for (;;) {
+    switch (*p) {
+    case '/':
+#if defined(_WIN32) && !defined(__CYGWIN__)
+    case '\\':
+#endif
+      ++p;
+      break;
+    case '\0':
+      return (NULL);
+    default: {
+      char *out = strdup(p);
+      if (out == NULL) {
+        fail_errno("strdup");
+      }
+      return (out);
+    }
+    }
+  }
+}
+
+static int apply_strip_components(struct archive_entry *e, int strip) {
+  if (strip <= 0) {
+    return (0);
+  }
+
+  const char *name = archive_entry_pathname(e);
+  char *stripped = strip_components_path(name, strip);
+  if (stripped == NULL) {
+    return (1);
+  }
+  archive_entry_set_pathname(e, stripped);
+  free(stripped);
+
+  const char *hardlink = archive_entry_hardlink(e);
+  if (hardlink != NULL) {
+    stripped = strip_components_path(hardlink, strip);
+    if (stripped == NULL) {
+      return (1);
+    }
+    archive_entry_set_hardlink(e, stripped);
+    free(stripped);
   }
   return (0);
 }
@@ -402,14 +509,18 @@ int main(int argc, char **argv) {
   const char *xar_path = NULL;
   const char *outdir = NULL;
   struct archive *xar;
+  struct archive *match = NULL;
   struct archive *disk;
   struct archive_entry *e;
   int r;
   int opt;
   const char *arg;
   int force = 0;
+  int no_same_owner = 0;
+  int no_same_permissions = 0;
   int do_expand = 0;
   int do_expand_full = 0;
+  int strip_components = 0;
   int flags;
 
   while ((opt = pkg_getopt(&argc, &argv, &arg)) != -1) {
@@ -427,6 +538,43 @@ int main(int argc, char **argv) {
       break;
     case 'E':
       do_expand_full = 1;
+      break;
+    case opt_include:
+      if (match == NULL) {
+        match = archive_match_new();
+        if (match == NULL) {
+          fail_errno("archive_match_new");
+        }
+      }
+      r = archive_match_include_pattern(match, arg);
+      if (r != ARCHIVE_OK) {
+        fail_archive(match, "include pattern");
+      }
+      break;
+    case opt_exclude:
+      if (match == NULL) {
+        match = archive_match_new();
+        if (match == NULL) {
+          fail_errno("archive_match_new");
+        }
+      }
+      r = archive_match_exclude_pattern(match, arg);
+      if (r != ARCHIVE_OK) {
+        fail_archive(match, "exclude pattern");
+      }
+      break;
+    case opt_strip_components:
+      strip_components = atoi(arg);
+      if (strip_components < 0) {
+        fprintf(stderr, "invalid strip-components: %s\n", arg);
+        return (2);
+      }
+      break;
+    case opt_no_same_owner:
+      no_same_owner = 1;
+      break;
+    case opt_no_same_permissions:
+      no_same_permissions = 1;
       break;
     default:
       usage(stderr);
@@ -454,6 +602,10 @@ int main(int argc, char **argv) {
     fail_errno("archive_read_new");
   }
 
+  if (match != NULL) {
+    archive_match_set_inclusion_recursion(match, 1);
+  }
+
   disk = archive_write_disk_new();
   if (disk == NULL) {
     fail_errno("archive_write_disk_new");
@@ -462,6 +614,16 @@ int main(int argc, char **argv) {
   flags = disk_flags;
   if (force) {
     flags |= ARCHIVE_EXTRACT_UNLINK;
+  }
+  if (no_same_owner) {
+    flags &= ~ARCHIVE_EXTRACT_OWNER;
+  }
+  if (no_same_permissions) {
+    flags &= ~(ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
+               ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS);
+#ifdef ARCHIVE_EXTRACT_MAC_METADATA
+    flags &= ~ARCHIVE_EXTRACT_MAC_METADATA;
+#endif
   }
   archive_write_disk_set_options(disk, flags);
   archive_write_disk_set_standard_lookup(disk);
@@ -485,7 +647,26 @@ int main(int argc, char **argv) {
   while ((r = archive_read_next_header(xar, &e)) == ARCHIVE_OK) {
     const char *p = archive_entry_pathname(e);
     char *rel = normalize_rel_path(p);
+    archive_entry_set_pathname(e, rel);
+    if (match != NULL) {
+      r = archive_match_excluded(match, e);
+      if (r != 0) {
+        archive_read_data_skip(xar);
+        free(rel);
+        continue;
+      }
+    }
     int is_nested = should_be_treated_as_nested_archive(rel);
+    if (apply_strip_components(e, strip_components)) {
+      archive_read_data_skip(xar);
+      free(rel);
+      continue;
+    }
+    free(rel);
+    rel = strdup(archive_entry_pathname(e));
+    if (rel == NULL) {
+      fail_errno("strdup");
+    }
 
     if (do_expand_full && is_nested) {
       mkdirs_for_path(rel);
@@ -500,11 +681,11 @@ int main(int argc, char **argv) {
             .eof = 0,
         };
 
-        extract_nested_archive_from_stream(&in, rel, force);
+        extract_nested_archive_from_stream(&in, rel, flags, match,
+                                           strip_components);
       }
       free(rel);
     } else {
-      archive_entry_set_pathname(e, rel);
       r = archive_read_extract2(xar, e, disk);
       if (r != ARCHIVE_OK) {
         free(rel);
@@ -516,5 +697,8 @@ int main(int argc, char **argv) {
 
   archive_write_free(disk);
   archive_read_free(xar);
+  if (match != NULL) {
+    archive_match_free(match);
+  }
   return (0);
 }
