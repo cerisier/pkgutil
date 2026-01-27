@@ -37,12 +37,12 @@ jobs:
           mv bazel-out/macos_arm64-opt/bin/pkgutil pkgutil_macos_arm64
           mv bazel-out/windows_amd64-opt/bin/pkgutil.exe pkgutil_windows_amd64.exe
 
-          # tar.zst the binaries
-          tar -czf pkgutil_macos_arm64.tar.zst pkgutil_macos_arm64
-          tar -czf pkgutil_macos_amd64.tar.zst pkgutil_macos_amd64
-          tar -czf pkgutil_linux_arm64_musl.tar.zst pkgutil_linux_arm64_musl
-          tar -czf pkgutil_linux_amd64_musl.tar.zst pkgutil_linux_amd64_musl
-          tar -czf pkgutil_windows_amd64.tar.zst pkgutil_windows_amd64.exe
+          # tar.gz the binaries
+          tar -czf pkgutil_macos_arm64.tar.gz pkgutil_macos_arm64
+          tar -czf pkgutil_macos_amd64.tar.gz pkgutil_macos_amd64
+          tar -czf pkgutil_linux_arm64_musl.tar.gz pkgutil_linux_arm64_musl
+          tar -czf pkgutil_linux_amd64_musl.tar.gz pkgutil_linux_amd64_musl
+          tar -czf pkgutil_windows_amd64.tar.gz pkgutil_windows_amd64.exe
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: 'pkgutil_*'
