@@ -32,8 +32,8 @@ jobs:
           bazel build --config release --config remote \
             --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
             //:for_all_platforms
-          mv bazel-out/linux_amd64_musl-opt/bin/pkgutil pkgutil_linux_amd64
-          mv bazel-out/linux_arm64_musl-opt/bin/pkgutil pkgutil_linux_arm64
+          mv bazel-out/linux_amd64_musl-opt/bin/pkgutil pkgutil_linux_amd64_musl
+          mv bazel-out/linux_arm64_musl-opt/bin/pkgutil pkgutil_linux_arm64_musl
           mv bazel-out/macos_arm64-opt/bin/pkgutil pkgutil_macos_arm64
           mv bazel-out/windows_amd64-opt/bin/pkgutil.exe pkgutil_windows_amd64.exe
       - uses: actions/attest-build-provenance@v2
@@ -47,6 +47,6 @@ jobs:
           path: |
             pkgutil_macos_arm64
             pkgutil_macos_amd64
-            pkgutil_linux_arm64
-            pkgutil_linux_amd64
+            pkgutil_linux_arm64_musl
+            pkgutil_linux_amd64_musl
             pkgutil_windows_amd64.exe
