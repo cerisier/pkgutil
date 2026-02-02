@@ -15,10 +15,6 @@ register_toolchains(
     "@toolchains_llvm_bootstrapped//toolchain:all",
 )
 
-# 0001-libarchive_enable_xar_support.patch
-# - add libxml2 dependency and md5 support to enable xar support
-# 0002-feat-add-pbzx-read-filter-codex.patch
-# - add pbzx read filter support to libarchive
 single_version_override(
     module_name = "libarchive",
     patches = [
@@ -27,14 +23,6 @@ single_version_override(
         "//patches:0003-give-mingw-acceptable-posix-types.patch",
     ],
     patch_strip = 1,
-)
-
-single_version_override(
-    module_name = "libxml2",
-    patches = [
-        "//patches:0004-fix-windows-is-mvsc-confusion.patch",
-    ],
-    patch_strip = 1
 )
 
 # bazel9 support: to be upstreamed to libarchive
