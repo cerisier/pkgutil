@@ -83,6 +83,9 @@ static void usage(FILE *out) {
 
 static char *strip_components_path(const char *path, int strip);
 static int apply_strip_components(struct archive_entry *e, int strip);
+static int match_excluded_with_prefix(struct archive *match,
+                                      struct archive_entry *e,
+                                      const char *prefix);
 
 static int pkg_getopt(int *argc, char ***argv, const char **arg) {
   enum { state_start = 0, state_next_word, state_short, state_long };
@@ -265,7 +268,8 @@ static int astream_close_cb(struct archive *a, void *client_data) {
 static void extract_nested_archive_from_stream(struct astream *in,
                                                const char *outdir, int flags,
                                                struct archive *match,
-                                               int strip_components) {
+                                               int strip_components,
+                                               const char *prefix) {
   struct archive *a = archive_read_new();
   struct archive *disk = archive_write_disk_new();
   struct archive_entry *e;
@@ -305,7 +309,7 @@ static void extract_nested_archive_from_stream(struct astream *in,
     }
 
     if (match != NULL) {
-      r = archive_match_excluded(match, e);
+      r = match_excluded_with_prefix(match, e, prefix);
       if (r != 0) {
         archive_read_data_skip(a);
         continue;
@@ -418,6 +422,43 @@ static int apply_strip_components(struct archive_entry *e, int strip) {
     free(stripped);
   }
   return (0);
+}
+
+static int match_excluded_with_prefix(struct archive *match,
+                                      struct archive_entry *e,
+                                      const char *prefix) {
+  if (match == NULL) {
+    return (0);
+  }
+  if (prefix == NULL || prefix[0] == '\0') {
+    return archive_match_excluded(match, e);
+  }
+  const char *orig = archive_entry_pathname(e);
+  if (orig == NULL) {
+    return archive_match_excluded(match, e);
+  }
+  char *orig_copy = strdup(orig);
+  if (orig_copy == NULL) {
+    fail_errno("strdup");
+  }
+  size_t plen = strlen(prefix);
+  size_t olen = strlen(orig_copy);
+  size_t total = plen + 1 + olen + 1;
+  char *buf = malloc(total);
+  if (buf == NULL) {
+    free(orig_copy);
+    fail_errno("malloc");
+  }
+  memcpy(buf, prefix, plen);
+  buf[plen] = '/';
+  memcpy(buf + plen + 1, orig_copy, olen + 1);
+
+  archive_entry_set_pathname(e, buf);
+  int r = archive_match_excluded(match, e);
+  archive_entry_set_pathname(e, orig_copy);
+  free(buf);
+  free(orig_copy);
+  return (r);
 }
 
 static int contains_dotdot_segment(const char *path) {
@@ -682,7 +723,7 @@ int main(int argc, char **argv) {
         };
 
         extract_nested_archive_from_stream(&in, rel, flags, match,
-                                           strip_components);
+                                           strip_components, rel);
       }
       free(rel);
     } else {
