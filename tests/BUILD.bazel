@@ -1,0 +1,185 @@
+load("@bazel_lib//lib:run_binary.bzl", "run_binary")
+load("@rules_zig//zig:defs.bzl", "zig_binary")
+load("@bazel_skylib//rules:native_binary.bzl", "native_test")
+
+zig_binary(
+    name = "test",
+    main = "test.zig",
+    testonly = True,
+    tags = ["manual"],
+)
+
+run_binary(
+    name = "pkgutil_component_expand_action",
+    tool = "//:pkgutil",
+    srcs = [
+        "@component_pkg//file",
+    ],
+    args = [
+        "--expand",
+        "$(location @component_pkg//file)",
+        "$@",
+    ],
+    out_dirs = ["pkgutil-component-expand"],
+    testonly = True,
+    tags = ["manual"],
+)
+
+run_binary(
+    name = "pkgutil_component_expand_full_action",
+    tool = "//:pkgutil",
+    srcs = [
+        "@component_pkg//file",
+    ],
+    args = [
+        "--exclude",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/Library/Frameworks/Ruby.framework/Versions/2.6/Headers/ruby/ruby",
+        "--expand-full",
+        "$(location @component_pkg//file)",
+        "$@",
+    ],
+    out_dirs = ["pkgutil-component-expand-full"],
+    testonly = True,
+    tags = ["manual"],
+)
+
+run_binary(
+    name = "pkgutil_product_expand_action",
+    tool = "//:pkgutil",
+    srcs = [
+        "@product_pkg//file",
+    ],
+    args = [
+        "--expand",
+        "$(location @product_pkg//file)",
+        "$@",
+    ],
+    out_dirs = ["pkgutil-product-expand"],
+    testonly = True,
+    tags = ["manual"],
+)
+
+run_binary(
+    name = "pkgutil_product_expand_full_action",
+    tool = "//:pkgutil",
+    srcs = [
+        "@product_pkg//file",
+    ],
+    args = [
+        "--exclude",
+        "Python_Command_Line_Tools.pkg/Payload/py*",
+        "--exclude",
+        "Python_Command_Line_Tools.pkg/Payload/idle*",
+        "--exclude",
+        # run_binary doesn't like spaces in args
+        "Python_Applications.pkg/Payload/Python*",
+        "--exclude",
+        "Python_Framework.pkg/Payload/Versions/Current",
+        "--exclude",
+        "Python_Framework.pkg/Payload/Versions/3.14/Frameworks/Tcl.framework/PrivateHeaders",
+        "--exclude",
+        "Python_Framework.pkg/Payload/Versions/3.14/Frameworks/Tk.framework/PrivateHeaders",
+        "--exclude",
+        "Python_Framework.pkg/Payload/Headers",
+        "--exclude",
+        "Python_Framework.pkg/Payload/Python",
+        "--exclude",
+        "Python_Framework.pkg/Payload/Resources",
+        "--expand-full",
+        "$(location @product_pkg//file)",
+        "$@",
+    ],
+    out_dirs = ["pkgutil-product-expand-full"],
+    testonly = True,
+    tags = ["manual"],
+)
+
+native_test(
+    name = "pkgutil_component_expand_test",
+    src = ":test",
+    args = [
+        "-e",
+        "$(location :pkgutil_component_expand_action)/Bom",
+        "$(location :pkgutil_component_expand_action)/Payload",
+        "$(location :pkgutil_component_expand_action)/PackageInfo",
+    ],
+    data = [
+        ":pkgutil_component_expand_action",
+    ],
+)
+
+native_test(
+    name = "pkgutil_component_expand_full_test",
+    src = ":test",
+    args = [
+        "-ne",
+        "$(location :pkgutil_component_expand_full_action)/Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/Library/Frameworks/Ruby.framework/Versions/2.6/Headers/ruby/ruby",
+    ],
+    data = [
+        ":pkgutil_component_expand_full_action",
+    ],
+)
+
+native_test(
+    name = "pkgutil_component_expand_full_exists_test",
+    src = ":test",
+    args = [
+        "-e",
+        "$(location :pkgutil_component_expand_full_action)/Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/Cryptexes/OS/System/Library/Frameworks/JavaScriptCore.framework/Versions/A/Headers/JavaScriptCore.h",
+    ],
+    data = [
+        ":pkgutil_component_expand_full_action",
+    ],
+)
+
+native_test(
+    name = "pkgutil_product_expand_test",
+    src = ":test",
+    args = [
+        "-e",
+        "$(location :pkgutil_product_expand_action)/Python_Install_Pip.pkg/Scripts",
+        "$(location :pkgutil_product_expand_action)/Python_Documentation.pkg/Payload",
+        "$(location :pkgutil_product_expand_action)/Python_Documentation.pkg/Scripts",
+        "$(location :pkgutil_product_expand_action)/PythonT_Framework.pkg/Payload",
+        "$(location :pkgutil_product_expand_action)/PythonT_Framework.pkg/Scripts",
+        "$(location :pkgutil_product_expand_action)/Python_Applications.pkg/Payload",
+        "$(location :pkgutil_product_expand_action)/Python_Command_Line_Tools.pkg/Payload",
+        "$(location :pkgutil_product_expand_action)/Python_Shell_Profile_Updater.pkg/Scripts",
+        "$(location :pkgutil_product_expand_action)/Python_Framework.pkg/Payload",
+    ],
+    data = [
+        ":pkgutil_product_expand_action",
+    ],
+)
+
+native_test(
+    name = "pkgutil_product_expand_full_test",
+    src = ":test",
+    args = [
+        "-e",
+        "$(location :pkgutil_product_expand_full_action)/Python_Framework.pkg/Payload/Versions/3.14/share/doc/python3.14/examples/Tools/msi/dev/dev_d.wxs",
+    ],
+    data = [
+        ":pkgutil_product_expand_full_action",
+    ],
+)
+
+native_test(
+    name = "pkgutil_product_expand_full_missing_test",
+    src = ":test",
+    args = [
+        "-ne",
+        "$(location :pkgutil_product_expand_full_action)/Python_Command_Line_Tools.pkg/Payload/python3.14",
+        "$(location :pkgutil_product_expand_full_action)/Python_Command_Line_Tools.pkg/Payload/idle3.14",
+        "$(location :pkgutil_product_expand_full_action)/Python_Applications.pkg/Payload/Python 3.14/",
+        "$(location :pkgutil_product_expand_full_action)/Python_Framework.pkg/Payload/Versions/Current",
+        "$(location :pkgutil_product_expand_full_action)/Python_Framework.pkg/Payload/Versions/3.14/Frameworks/Tcl.framework/PrivateHeaders",
+        "$(location :pkgutil_product_expand_full_action)/Python_Framework.pkg/Payload/Versions/3.14/Frameworks/Tk.framework/PrivateHeaders",
+        "$(location :pkgutil_product_expand_full_action)/Python_Framework.pkg/Payload/Headers",
+        "$(location :pkgutil_product_expand_full_action)/Python_Framework.pkg/Payload/Python",
+        "$(location :pkgutil_product_expand_full_action)/Python_Framework.pkg/Payload/Resources",
+    ],
+    data = [
+        ":pkgutil_product_expand_full_action",
+    ],
+)
