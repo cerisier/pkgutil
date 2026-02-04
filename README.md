@@ -1,5 +1,7 @@
 # pkgutil
 
+[![pkgutil-tests](https://github.com/cerisier/pkgutil/actions/workflows/test.yml/badge.svg)](https://github.com/cerisier/pkgutil/actions/workflows/test.yml)
+
 Cross-platform reimplementation of Apple’s `pkgutil` (macOS), with a focus on
 making `.pkg` extraction work on other platforms.
 
