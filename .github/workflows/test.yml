@@ -42,6 +42,7 @@ jobs:
       - name: bazel test //tests:all
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        shell: bash
         run: |
           bazel test --test_output=errors \
             --config release \
