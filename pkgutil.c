@@ -77,6 +77,8 @@ static void usage(FILE *out) {
 
 static char *strip_components_path(const char *path, int strip);
 static int apply_strip_components(struct archive_entry *e, int strip);
+static int path_component_count(const char *path);
+static char *normalize_rel_path(const char *path);
 static int match_excluded_with_prefix(struct archive *match,
                                       struct archive_entry *e,
                                       const char *prefix);
@@ -302,23 +304,31 @@ static void extract_nested_archive_from_stream(struct astream *in,
       fail_archive(a, "read nested header");
     }
 
+    const char *p = archive_entry_pathname(e);
+    char *rel = normalize_rel_path(p);
+    archive_entry_set_pathname(e, rel);
+
     if (match != NULL) {
       r = match_excluded_with_prefix(match, e, prefix);
       if (r != 0) {
         archive_read_data_skip(a);
+        free(rel);
         continue;
       }
     }
 
     if (apply_strip_components(e, strip_components)) {
       archive_read_data_skip(a);
+      free(rel);
       continue;
     }
 
     r = archive_read_extract2(a, e, disk);
     if (r != ARCHIVE_OK) {
+      free(rel);
       fail_archive(a, "extract nested entry");
     }
+    free(rel);
   }
 
   archive_write_free(disk);
@@ -416,6 +426,34 @@ static int apply_strip_components(struct archive_entry *e, int strip) {
     free(stripped);
   }
   return (0);
+}
+
+static int path_component_count(const char *path) {
+  int count = 0;
+  int in_component = 0;
+
+  if (path == NULL) {
+    return (0);
+  }
+
+  for (const char *p = path; *p != '\0'; p++) {
+    switch (*p) {
+    case '/':
+#if defined(_WIN32) && !defined(__CYGWIN__)
+    case '\\':
+#endif
+      in_component = 0;
+      break;
+    default:
+      if (!in_component) {
+        count++;
+        in_component = 1;
+      }
+      break;
+    }
+  }
+
+  return (count);
 }
 
 static int match_excluded_with_prefix(struct archive *match,
@@ -682,19 +720,24 @@ int main(int argc, char **argv) {
       }
     }
     int is_nested = should_be_treated_as_nested_archive(rel);
-    if (apply_strip_components(e, strip_components)) {
-      archive_read_data_skip(xar);
-      free(rel);
-      continue;
-    }
-    free(rel);
-    rel = strdup(archive_entry_pathname(e));
-    if (rel == NULL) {
-      fail_errno("strdup");
-    }
-
     if (do_expand_full && is_nested) {
-      mkdirs_for_path(rel);
+      char *nested_outdir = strip_components_path(rel, strip_components);
+      int nested_strip = strip_components;
+      int rel_components = path_component_count(rel);
+
+      if (nested_outdir == NULL) {
+        nested_outdir = strdup(".");
+        if (nested_outdir == NULL) {
+          fail_errno("strdup");
+        }
+      }
+      if (nested_strip > rel_components) {
+        nested_strip -= rel_components;
+      } else {
+        nested_strip = 0;
+      }
+
+      mkdirs_for_path(nested_outdir);
 
       {
         struct astream in = {
@@ -706,11 +749,17 @@ int main(int argc, char **argv) {
             .eof = 0,
         };
 
-        extract_nested_archive_from_stream(&in, rel, flags, match,
-                                           strip_components, rel);
+        extract_nested_archive_from_stream(&in, nested_outdir, flags, match,
+                                           nested_strip, rel);
       }
+      free(nested_outdir);
       free(rel);
     } else {
+      if (apply_strip_components(e, strip_components)) {
+        archive_read_data_skip(xar);
+        free(rel);
+        continue;
+      }
       r = archive_read_extract2(xar, e, disk);
       if (r != ARCHIVE_OK) {
         free(rel);
