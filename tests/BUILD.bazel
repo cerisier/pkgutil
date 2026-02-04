@@ -1,6 +1,7 @@
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
 load("@rules_zig//zig:defs.bzl", "zig_binary")
 load("@bazel_skylib//rules:native_binary.bzl", "native_test")
+load(":exec_test.bzl", "exec_test")
 
 zig_binary(
     name = "test",
@@ -94,7 +95,8 @@ run_binary(
     tags = ["manual"],
 )
 
-native_test(
+exec_test(
+    native_test,
     name = "pkgutil_component_expand_test",
     src = ":test",
     args = [
@@ -108,7 +110,8 @@ native_test(
     ],
 )
 
-native_test(
+exec_test(
+    native_test,
     name = "pkgutil_component_expand_full_test",
     src = ":test",
     args = [
@@ -120,7 +123,8 @@ native_test(
     ],
 )
 
-native_test(
+exec_test(
+    native_test,
     name = "pkgutil_component_expand_full_exists_test",
     src = ":test",
     args = [
@@ -132,7 +136,8 @@ native_test(
     ],
 )
 
-native_test(
+exec_test(
+    native_test,
     name = "pkgutil_product_expand_test",
     src = ":test",
     args = [
@@ -152,7 +157,8 @@ native_test(
     ],
 )
 
-native_test(
+exec_test(
+    native_test,
     name = "pkgutil_product_expand_full_test",
     src = ":test",
     args = [
@@ -164,7 +170,8 @@ native_test(
     ],
 )
 
-native_test(
+exec_test(
+    native_test,
     name = "pkgutil_product_expand_full_missing_test",
     src = ":test",
     args = [

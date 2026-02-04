@@ -29,8 +29,11 @@ jobs:
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         run: |
-          bazel build --config release --config remote \
+          bazel build \
+            --config release \
+            --config remote \
             --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
+            --@libarchive//:use_mbedtls=true \
             //:for_all_platforms
           mv bazel-out/linux_amd64_musl-opt/bin/pkgutil pkgutil_linux_amd64
           mv bazel-out/linux_arm64_musl-opt/bin/pkgutil pkgutil_linux_arm64
