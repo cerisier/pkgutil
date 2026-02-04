@@ -23,8 +23,9 @@ jobs:
             runner: ubuntu-latest
           # - name: linux-arm64
             # runner: ubuntu-24.04-arm64
-          - name: windows-amd64
-            runner: windows-latest
+          # rules_zig doesn't work there :(
+          # - name: windows-amd64
+          #   runner: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +39,18 @@ jobs:
           disk-cache: ${{ github.workflow }}
           # Share repository cache between workflows.
           repository-cache: true
+
+      - name: bazel build //:for_all_platforms
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        shell: bash
+        run: |
+          bazel build \
+            --config release \
+            --config remote \
+            --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
+            --@libarchive//:use_mbedtls=true \
+            //:for_all_platforms
 
       - name: bazel test //...
         env:
