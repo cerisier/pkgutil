@@ -11,6 +11,10 @@ bazel_dep(name = "libarchive", version = "3.8.1")
 bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.4.1")
 bazel_dep(name = "rules_cc", version = "0.2.14")
 
+bazel_dep(name = "bazel_skylib", version = "1.9.0", dev_dependency = True)
+bazel_dep(name = "rules_shell", version = "0.5.0", dev_dependency = True)
+bazel_dep(name = "rules_zig", version = "0.12.3", dev_dependency = True)
+
 register_toolchains(
     "@toolchains_llvm_bootstrapped//toolchain:all",
 )
@@ -44,4 +48,34 @@ single_version_override(
 single_version_override(
     module_name = "mbedtls",
     version = "3.6.0.bcr.1",
+)
+
+single_version_override(
+    module_name = "zlib",
+    version = "1.3.1.bcr.8",
+)
+
+## TESTS
+
+http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
+
+http_file(
+    name = "component_pkg",
+    urls = ["https://swcdn.apple.com/content/downloads/52/01/082-41241-A_0747ZN8FHV/dectd075r63pppkkzsb75qk61s0lfee22j/CLTools_macOSNMOS_SDK.pkg"],
+    downloaded_file_path = "component.pkg",
+    sha256 = "ba3453d62b3d2babf67f3a4a44e8073d6555c85f114856f4390a1f53bd76e24a",
+)
+
+http_file(
+    name = "product_pkg",
+    urls = ["https://www.python.org/ftp/python/3.14.3/python-3.14.3-macos11.pkg"],
+    downloaded_file_path = "product.pkg",
+    sha256 = "50b709f72cb5ed87d5882901923face981dd657569717761832c36db3bf08238",
+)
+
+archive_override(
+    module_name = "toolchains_llvm_bootstrapped",
+    urls = ["https://github.com/cerisier/toolchains_llvm_bootstrapped/archive/9799c1d0d976409451bbe5275e8d3d607e442956.tar.gz"],
+    strip_prefix = "toolchains_llvm_bootstrapped-9799c1d0d976409451bbe5275e8d3d607e442956",
+    integrity = "sha256-SJuGXePryLXuDemHsvfajLFMHT+vonxstVddkJlhbrg=",
 )

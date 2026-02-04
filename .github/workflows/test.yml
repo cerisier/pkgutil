@@ -1,0 +1,66 @@
+name: pkgutil-tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            runner: macos-latest
+          - name: linux-amd64
+            runner: ubuntu-latest
+          # - name: linux-arm64
+            # runner: ubuntu-24.04-arm64
+          # rules_zig doesn't work there :(
+          - name: windows-amd64
+            runner: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bazelisk
+        uses: bazel-contrib/setup-bazel@0.18.0
+        with:
+          # Avoid downloading Bazel every time.
+          bazelisk-cache: true
+          # Store build cache per workflow.
+          disk-cache: ${{ github.workflow }}
+          # Share repository cache between workflows.
+          repository-cache: true
+
+      - name: bazel build //:for_all_platforms
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        shell: bash
+        run: |
+          bazel build \
+            --config release \
+            --config remote \
+            --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
+            --@libarchive//:use_mbedtls=true \
+            //:for_all_platforms
+
+      - name: bazel test //...
+        if: matrix.name != 'windows-amd64'
+        env:
+          BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
+        shell: bash
+        run: |
+          bazel test --test_output=errors \
+            --config release \
+            --config remote \
+            --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
+            --@libarchive//:use_mbedtls=true \
+            //...

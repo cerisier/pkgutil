@@ -34,7 +34,7 @@ cc_binary(
     platform_transition_binary(
         name = "for_" + platform.split(":")[1],
         binary = ":pkgutil",
-        tags = ["no-remote"] if platform == "@toolchains_llvm_bootstrapped//platforms:macos_arm64" else [],
+        tags = ["manual"] + ["no-remote"] if platform == "@toolchains_llvm_bootstrapped//platforms:macos_arm64" else [],
         target_platform = platform,
     )
     for platform in PLATFORMS
@@ -46,4 +46,5 @@ filegroup(
         ":for_" + platform.split(":")[1]
         for platform in PLATFORMS
     ],
+    tags = ["manual"],
 )
