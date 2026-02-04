@@ -39,7 +39,7 @@ jobs:
           # Share repository cache between workflows.
           repository-cache: true
 
-      - name: bazel test //tests:all
+      - name: bazel test //...
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         shell: bash
@@ -49,4 +49,4 @@ jobs:
             --config remote \
             --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
             --@libarchive//:use_mbedtls=true \
-            //tests:all
+            //...
