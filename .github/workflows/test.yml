@@ -53,17 +53,14 @@ jobs:
             //:for_all_platforms
 
       - name: bazel test //...
+        if: matrix.name != 'windows-amd64'
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         shell: bash
         run: |
-          EXTRA_ARGS=""
-          if [[ "${{ matrix.name }}" != "windows-amd64" ]]; then
-            EXTRA_ARGS="--config remote --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
-          fi
-
           bazel test --test_output=errors \
             --config release \
+            --config remote \
+            --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
             --@libarchive//:use_mbedtls=true \
-            $EXTRA_ARGS \
             //...
