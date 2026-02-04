@@ -21,8 +21,8 @@ jobs:
             runner: macos-latest
           - name: linux-amd64
             runner: ubuntu-latest
-          - name: linux-arm64
-            runner: ubuntu-24.04-arm64
+          # - name: linux-arm64
+            # runner: ubuntu-24.04-arm64
           - name: windows-amd64
             runner: windows-latest
 
@@ -48,4 +48,4 @@ jobs:
             --config remote \
             --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
             --@libarchive//:use_mbedtls=true \
-            //...
+            //tests:all

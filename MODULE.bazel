@@ -67,3 +67,10 @@ http_file(
     downloaded_file_path = "product.pkg",
     sha256 = "50b709f72cb5ed87d5882901923face981dd657569717761832c36db3bf08238",
 )
+
+archive_override(
+    module_name = "toolchains_llvm_bootstrapped",
+    urls = ["https://github.com/cerisier/toolchains_llvm_bootstrapped/archive/9799c1d0d976409451bbe5275e8d3d607e442956.tar.gz"],
+    strip_prefix = "toolchains_llvm_bootstrapped-9799c1d0d976409451bbe5275e8d3d607e442956",
+    integrity = "sha256-SJuGXePryLXuDemHsvfajLFMHT+vonxstVddkJlhbrg=",
+)
