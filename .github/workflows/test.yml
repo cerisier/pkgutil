@@ -24,8 +24,8 @@ jobs:
           # - name: linux-arm64
             # runner: ubuntu-24.04-arm64
           # rules_zig doesn't work there :(
-          # - name: windows-amd64
-          #   runner: windows-latest
+          - name: windows-amd64
+            runner: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -57,9 +57,13 @@ jobs:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         shell: bash
         run: |
+          EXTRA_ARGS=""
+          if [[ "${{ matrix.name }}" != "windows-amd64" ]]; then
+            EXTRA_ARGS="--config remote --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY"
+          fi
+
           bazel test --test_output=errors \
             --config release \
-            --config remote \
-            --remote_header=x-buildbuddy-api-key=$BUILDBUDDY_API_KEY \
             --@libarchive//:use_mbedtls=true \
+            $EXTRA_ARGS \
             //...
