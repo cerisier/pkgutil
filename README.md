@@ -3,13 +3,27 @@
 Cross-platform reimplementation of Apple’s `pkgutil` (macOS), with a focus on
 making `.pkg` extraction work on other platforms.
 
-## Supported commands
+## Usage
+```
+Usage: pkgutil [OPTIONS] [COMMANDS] ...
 
-Currently:
-- `--expand`
-- `--expand-full`
+Options:
+  --help                 Show this usage guide
+  --verbose, -v          Show contextual information and format for easy reading
+  --force, -f            Perform all operations without asking for confirmation
+  --include PATTERN      Only include paths matching PATTERN
+  --exclude PATTERN      Exclude paths matching PATTERN
+  --strip-components N   Strip N leading path components
 
-Both work for component packages and product archives.
+File Commands:
+  --expand PKG DIR       Write flat package entries to DIR
+  --expand-full PKG DIR  Fully expand package contents to DIR
+```
+
+## Limitations
+
+Only extraction of `.pkg` is supported for the moment.
+Both for component packages and product archives.
 
 ## Design choices
 
