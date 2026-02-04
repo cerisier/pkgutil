@@ -31,7 +31,6 @@ enum {
   opt_include = 256,
   opt_exclude,
   opt_strip_components,
-  opt_no_same_owner,
   opt_no_same_permissions,
 };
 
@@ -46,7 +45,6 @@ static const struct option {
                     {"include", 1, opt_include},
                     {"exclude", 1, opt_exclude},
                     {"strip-components", 1, opt_strip_components},
-                    {"no-same-owner", 0, opt_no_same_owner},
                     {"no-same-permissions", 0, opt_no_same_permissions},
                     {"verbose", 0, 'v'},
                     {NULL, 0, 0}};
@@ -74,7 +72,6 @@ static void usage(FILE *out) {
           "  --include PATTERN      Only include paths matching PATTERN\n"
           "  --exclude PATTERN      Exclude paths matching PATTERN\n"
           "  --strip-components N   Strip N leading path components\n"
-          "  --no-same-owner        Do not preserve ownership\n"
           "  --no-same-permissions  Do not preserve permissions\n\n"
           "File Commands:\n"
           "  --expand PKG DIR       Write flat package entries to DIR\n"
@@ -557,7 +554,6 @@ int main(int argc, char **argv) {
   int opt;
   const char *arg;
   int force = 0;
-  int no_same_owner = 0;
   int no_same_permissions = 0;
   int do_expand = 0;
   int do_expand_full = 0;
@@ -611,9 +607,6 @@ int main(int argc, char **argv) {
         return (2);
       }
       break;
-    case opt_no_same_owner:
-      no_same_owner = 1;
-      break;
     case opt_no_same_permissions:
       no_same_permissions = 1;
       break;
@@ -656,9 +649,9 @@ int main(int argc, char **argv) {
   if (force) {
     flags |= ARCHIVE_EXTRACT_UNLINK;
   }
-  if (no_same_owner) {
-    flags &= ~ARCHIVE_EXTRACT_OWNER;
-  }
+  // Force no-same-owner behavior
+  flags &= ~ARCHIVE_EXTRACT_OWNER;
+
   if (no_same_permissions) {
     flags &= ~(ARCHIVE_EXTRACT_PERM | ARCHIVE_EXTRACT_ACL |
                ARCHIVE_EXTRACT_XATTR | ARCHIVE_EXTRACT_FFLAGS);
