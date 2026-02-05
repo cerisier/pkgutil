@@ -2,7 +2,6 @@
 #include <archive_entry.h>
 
 #include <errno.h>
-#include <fnmatch.h>
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -87,12 +86,7 @@ struct pattern_list {
 };
 static void pattern_list_add(struct pattern_list *list, const char *pattern);
 static void pattern_list_free(struct pattern_list *list);
-static int matches_any_pattern(const struct pattern_list *list, const char *path);
-static int matches_any_pattern_with_recursion(const struct pattern_list *list,
-                                              const char *path);
-static int should_extract_path(const struct pattern_list *includes,
-                               const struct pattern_list *excludes,
-                               const char *path);
+static int should_extract_path(struct archive *matching, const char *path);
 static char *join_prefix_path(const char *prefix, const char *path);
 static int has_include_descendant(const struct pattern_list *includes,
                                   const char *path);
@@ -277,8 +271,7 @@ static int astream_close_cb(struct archive *a, void *client_data) {
 
 static void extract_nested_archive_from_stream(struct astream *in,
                                                const char *outdir, int flags,
-                                               const struct pattern_list *includes,
-                                               const struct pattern_list *excludes,
+                                               struct archive *matching,
                                                int strip_components,
                                                const char *prefix) {
   struct archive *a = archive_read_new();
@@ -324,7 +317,7 @@ static void extract_nested_archive_from_stream(struct astream *in,
     archive_entry_set_pathname(e, rel);
 
     char *logical_path = join_prefix_path(prefix, rel);
-    if (!should_extract_path(includes, excludes, logical_path)) {
+    if (!should_extract_path(matching, logical_path)) {
       archive_read_data_skip(a);
       free(logical_path);
       free(rel);
@@ -498,60 +491,18 @@ static void pattern_list_free(struct pattern_list *list) {
   list->cap = 0;
 }
 
-static int matches_any_pattern(const struct pattern_list *list,
-                               const char *path) {
-  for (size_t i = 0; i < list->len; i++) {
-    const char *pat = list->items[i];
-    if (fnmatch(pat, path, FNM_PATHNAME) == 0) {
-      return (1);
-    }
-    size_t pat_len = strlen(pat);
-    if (pat_len >= 2 && pat[pat_len - 2] == '/' && pat[pat_len - 1] == '*') {
-      size_t dir_len = pat_len - 2;
-      if (strlen(path) == dir_len && strncmp(path, pat, dir_len) == 0) {
-        return (1);
-      }
-    }
+static int should_extract_path(struct archive *matching, const char *path) {
+  struct archive_entry *entry = archive_entry_new();
+  if (entry == NULL) {
+    fail_errno("archive_entry_new");
   }
-  return (0);
-}
-
-static int matches_any_pattern_with_recursion(const struct pattern_list *list,
-                                              const char *path) {
-  if (matches_any_pattern(list, path)) {
-    return (1);
+  archive_entry_set_pathname(entry, path);
+  int excluded = archive_match_excluded(matching, entry);
+  archive_entry_free(entry);
+  if (excluded < 0) {
+    fail_archive(matching, "archive_match_excluded");
   }
-  char *tmp = strdup(path);
-  if (tmp == NULL) {
-    fail_errno("strdup");
-  }
-  for (;;) {
-    char *slash = strrchr(tmp, '/');
-    if (slash == NULL) {
-      break;
-    }
-    *slash = '\0';
-    if (matches_any_pattern(list, tmp)) {
-      free(tmp);
-      return (1);
-    }
-  }
-  free(tmp);
-  return (0);
-}
-
-static int should_extract_path(const struct pattern_list *includes,
-                               const struct pattern_list *excludes,
-                               const char *path) {
-  if (includes->len > 0 &&
-      !matches_any_pattern_with_recursion(includes, path)) {
-    return (0);
-  }
-  if (excludes->len > 0 &&
-      matches_any_pattern_with_recursion(excludes, path)) {
-    return (0);
-  }
-  return (1);
+  return (excluded == 0);
 }
 
 static int has_include_descendant(const struct pattern_list *includes,
@@ -677,8 +628,8 @@ int main(int argc, char **argv) {
   const char *xar_path = NULL;
   const char *outdir = NULL;
   struct archive *xar;
+  struct archive *matching;
   struct pattern_list includes = {0};
-  struct pattern_list excludes = {0};
   struct archive *disk;
   struct archive_entry *e;
   int r;
@@ -689,6 +640,11 @@ int main(int argc, char **argv) {
   int do_expand_full = 0;
   int strip_components = 0;
   int flags;
+
+  matching = archive_match_new();
+  if (matching == NULL) {
+    fail_errno("archive_match_new");
+  }
 
   while ((opt = pkg_getopt(&argc, &argv, &arg)) != -1) {
     switch (opt) {
@@ -708,9 +664,14 @@ int main(int argc, char **argv) {
       break;
     case opt_include:
       pattern_list_add(&includes, arg);
+      if (archive_match_include_pattern(matching, arg) != ARCHIVE_OK) {
+        fail_archive(matching, "archive_match_include_pattern");
+      }
       break;
     case opt_exclude:
-      pattern_list_add(&excludes, arg);
+      if (archive_match_exclude_pattern(matching, arg) != ARCHIVE_OK) {
+        fail_archive(matching, "archive_match_exclude_pattern");
+      }
       break;
     case opt_strip_components:
       strip_components = atoi(arg);
@@ -781,6 +742,10 @@ int main(int argc, char **argv) {
     fail_errno("chdir(outdir)");
   }
 
+  if (archive_match_set_inclusion_recursion(matching, 1) != ARCHIVE_OK) {
+    fail_archive(matching, "archive_match_set_inclusion_recursion");
+  }
+
   while ((r = archive_read_next_header(xar, &e)) == ARCHIVE_OK) {
     const char *p = archive_entry_pathname(e);
     char *rel = normalize_rel_path(p);
@@ -788,7 +753,7 @@ int main(int argc, char **argv) {
     int is_nested = should_be_treated_as_nested_archive(rel);
     if (do_expand_full && is_nested) {
       char *logical_path = join_prefix_path(NULL, rel);
-      int include_nested = should_extract_path(&includes, &excludes, logical_path);
+      int include_nested = should_extract_path(matching, logical_path);
       if (!include_nested && includes.len > 0 &&
           has_include_descendant(&includes, logical_path)) {
         include_nested = 1;
@@ -828,14 +793,14 @@ int main(int argc, char **argv) {
             .eof = 0,
         };
 
-        extract_nested_archive_from_stream(&in, nested_outdir, flags, &includes,
-                                           &excludes, nested_strip, rel);
+        extract_nested_archive_from_stream(&in, nested_outdir, flags, matching,
+                                           nested_strip, rel);
       }
       free(nested_outdir);
       free(rel);
     } else {
       char *logical_path = join_prefix_path(NULL, rel);
-      if (!should_extract_path(&includes, &excludes, logical_path)) {
+      if (!should_extract_path(matching, logical_path)) {
         archive_read_data_skip(xar);
         free(logical_path);
         free(rel);
@@ -858,7 +823,7 @@ int main(int argc, char **argv) {
 
   archive_write_free(disk);
   archive_read_free(xar);
+  archive_match_free(matching);
   pattern_list_free(&includes);
-  pattern_list_free(&excludes);
   return (0);
 }

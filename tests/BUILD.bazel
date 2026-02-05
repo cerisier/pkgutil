@@ -73,10 +73,10 @@ run_binary(
     args = [
         "--include",
         "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/usr/*",
+        "--include",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/*",
         "--exclude",
-        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/usr/include/tkPlatDecls.h",
-        "--exclude",
-        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/usr/lib/libMTLCapture.tbd",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/Library/Frameworks/Ruby.framework/Versions/2.6/Headers/ruby/ruby",
         "--exclude",
         "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/usr/share/*",
         "--expand-full",
@@ -202,6 +202,7 @@ exec_test(
     args = [
         "-e",
         "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/System",
         "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr/lib/libNFC_HAL.tbd",
     ],
     data = [
@@ -215,7 +216,6 @@ exec_test(
     src = ":test",
     args = [
         "-ne",
-        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/System",
         "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr/share",
     ],
     data = [
