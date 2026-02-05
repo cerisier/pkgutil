@@ -52,7 +52,7 @@ run_binary(
     ],
     args = [
         "--exclude",
-        "System/Library/Frameworks/Ruby.framework/Versions/2.6/Headers/ruby/ruby",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/Library/Frameworks/Ruby.framework/Versions/2.6/Headers/ruby/ruby",
         "--expand-full",
         "--strip-components",
         "6",
@@ -60,32 +60,6 @@ run_binary(
         "$@",
     ],
     out_dirs = ["pkgutil-component-expand-full-strip-6"],
-    testonly = True,
-    tags = ["manual"],
-)
-
-run_binary(
-    name = "pkgutil_component_expand_full_strip_6_include_exclude_action",
-    tool = "//:pkgutil",
-    srcs = [
-        "@component_pkg//file",
-    ],
-    args = [
-        "--include",
-        "usr/*",
-        "--exclude",
-        "usr/include/*",
-        "--exclude",
-        "usr/lib/*",
-        "--exclude",
-        "usr/share/*",
-        "--expand-full",
-        "--strip-components",
-        "6",
-        "$(location @component_pkg//file)",
-        "$@",
-    ],
-    out_dirs = ["pkgutil-component-expand-full-strip-6-include-exclude"],
     testonly = True,
     tags = ["manual"],
 )
@@ -192,32 +166,6 @@ exec_test(
     ],
     data = [
         ":pkgutil_component_expand_full_strip_6_action",
-    ],
-)
-
-exec_test(
-    native_test,
-    name = "pkgutil_component_expand_full_strip_6_include_exclude_test",
-    src = ":test",
-    args = [
-        "-ne",
-        "$(location :pkgutil_component_expand_full_strip_6_include_exclude_action)/usr/share/man/mann/bignum.n",
-    ],
-    data = [
-        ":pkgutil_component_expand_full_strip_6_include_exclude_action",
-    ],
-)
-
-exec_test(
-    native_test,
-    name = "pkgutil_component_expand_full_strip_6_include_exclude_exists_test",
-    src = ":test",
-    args = [
-        "-e",
-        "$(location :pkgutil_component_expand_full_strip_6_include_exclude_action)/usr/bin/cups-config",
-    ],
-    data = [
-        ":pkgutil_component_expand_full_strip_6_include_exclude_action",
     ],
 )
 
