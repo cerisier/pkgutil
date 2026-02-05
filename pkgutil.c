@@ -308,6 +308,12 @@ static void extract_nested_archive_from_stream(struct astream *in,
     char *rel = normalize_rel_path(p);
     archive_entry_set_pathname(e, rel);
 
+    if (apply_strip_components(e, strip_components)) {
+      archive_read_data_skip(a);
+      free(rel);
+      continue;
+    }
+
     if (match != NULL) {
       r = match_excluded_with_prefix(match, e, prefix);
       if (r != 0) {
@@ -315,12 +321,6 @@ static void extract_nested_archive_from_stream(struct astream *in,
         free(rel);
         continue;
       }
-    }
-
-    if (apply_strip_components(e, strip_components)) {
-      archive_read_data_skip(a);
-      free(rel);
-      continue;
     }
 
     r = archive_read_extract2(a, e, disk);
@@ -462,7 +462,8 @@ static int match_excluded_with_prefix(struct archive *match,
   if (match == NULL) {
     return (0);
   }
-  if (prefix == NULL || prefix[0] == '\0') {
+  if (prefix == NULL || prefix[0] == '\0' ||
+      (prefix[0] == '.' && prefix[1] == '\0')) {
     return archive_match_excluded(match, e);
   }
   const char *orig = archive_entry_pathname(e);
@@ -711,14 +712,6 @@ int main(int argc, char **argv) {
     const char *p = archive_entry_pathname(e);
     char *rel = normalize_rel_path(p);
     archive_entry_set_pathname(e, rel);
-    if (match != NULL) {
-      r = archive_match_excluded(match, e);
-      if (r != 0) {
-        archive_read_data_skip(xar);
-        free(rel);
-        continue;
-      }
-    }
     int is_nested = should_be_treated_as_nested_archive(rel);
     if (do_expand_full && is_nested) {
       char *nested_outdir = strip_components_path(rel, strip_components);
@@ -750,7 +743,7 @@ int main(int argc, char **argv) {
         };
 
         extract_nested_archive_from_stream(&in, nested_outdir, flags, match,
-                                           nested_strip, rel);
+                                           nested_strip, nested_outdir);
       }
       free(nested_outdir);
       free(rel);
@@ -759,6 +752,14 @@ int main(int argc, char **argv) {
         archive_read_data_skip(xar);
         free(rel);
         continue;
+      }
+      if (match != NULL) {
+        r = archive_match_excluded(match, e);
+        if (r != 0) {
+          archive_read_data_skip(xar);
+          free(rel);
+          continue;
+        }
       }
       r = archive_read_extract2(xar, e, disk);
       if (r != ARCHIVE_OK) {
