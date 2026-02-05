@@ -65,6 +65,32 @@ run_binary(
 )
 
 run_binary(
+    name = "pkgutil_component_expand_full_strip_6_usr_filter_action",
+    tool = "//:pkgutil",
+    srcs = [
+        "@component_pkg//file",
+    ],
+    args = [
+        "--include",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/usr/*",
+        "--include",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/*",
+        "--exclude",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/System/Library/Frameworks/Ruby.framework/Versions/2.6/Headers/ruby/ruby",
+        "--exclude",
+        "Payload/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk/usr/share/*",
+        "--expand-full",
+        "--strip-components",
+        "6",
+        "$(location @component_pkg//file)",
+        "$@",
+    ],
+    out_dirs = ["pkgutil-component-expand-full-strip-6-usr-filter"],
+    testonly = True,
+    tags = ["manual"],
+)
+
+run_binary(
     name = "pkgutil_product_expand_action",
     tool = "//:pkgutil",
     srcs = [
@@ -166,6 +192,34 @@ exec_test(
     ],
     data = [
         ":pkgutil_component_expand_full_strip_6_action",
+    ],
+)
+
+exec_test(
+    native_test,
+    name = "pkgutil_component_expand_full_strip_6_usr_filter_test",
+    src = ":test",
+    args = [
+        "-e",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/System",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr/lib/libNFC_HAL.tbd",
+    ],
+    data = [
+        ":pkgutil_component_expand_full_strip_6_usr_filter_action",
+    ],
+)
+
+exec_test(
+    native_test,
+    name = "pkgutil_component_expand_full_strip_6_usr_filter_missing_test",
+    src = ":test",
+    args = [
+        "-ne",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr/share",
+    ],
+    data = [
+        ":pkgutil_component_expand_full_strip_6_usr_filter_action",
     ],
 )
 
