@@ -8,7 +8,7 @@ module(
 bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "bazel_lib", version = "3.1.1")
 bazel_dep(name = "libarchive", version = "3.8.1.bcr.2")
-bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.2")
+bazel_dep(name = "toolchains_llvm_bootstrapped", version = "0.5.5")
 bazel_dep(name = "rules_cc", version = "0.2.14")
 
 bazel_dep(name = "bazel_skylib", version = "1.9.0", dev_dependency = True)
@@ -29,6 +29,14 @@ single_version_override(
     patch_strip = 1,
 )
 
+single_version_override(
+    module_name = "xz",
+    patches = [
+        "//patches:0004-xz-disable-x86-intrinsics-on-windows-arm64.patch",
+    ],
+    patch_strip = 1,
+)
+
 ## TESTS
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
@@ -45,11 +53,4 @@ http_file(
     urls = ["https://www.python.org/ftp/python/3.14.3/python-3.14.3-macos11.pkg"],
     downloaded_file_path = "product.pkg",
     sha256 = "50b709f72cb5ed87d5882901923face981dd657569717761832c36db3bf08238",
-)
-
-archive_override(
-    module_name = "toolchains_llvm_bootstrapped",
-    urls = ["https://github.com/cerisier/toolchains_llvm_bootstrapped/archive/9799c1d0d976409451bbe5275e8d3d607e442956.tar.gz"],
-    strip_prefix = "toolchains_llvm_bootstrapped-9799c1d0d976409451bbe5275e8d3d607e442956",
-    integrity = "sha256-SJuGXePryLXuDemHsvfajLFMHT+vonxstVddkJlhbrg=",
 )
