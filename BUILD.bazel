@@ -4,11 +4,11 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 package(default_visibility = ["//visibility:public"])
 
 PLATFORMS = [
-    "@toolchains_llvm_bootstrapped//platforms:macos_arm64",
-    "@toolchains_llvm_bootstrapped//platforms:linux_amd64_musl",
-    "@toolchains_llvm_bootstrapped//platforms:linux_arm64_musl",
-    "@toolchains_llvm_bootstrapped//platforms:windows_amd64",
-    "@toolchains_llvm_bootstrapped//platforms:windows_arm64",
+    "@llvm//platforms:macos_amd64",
+    "@llvm//platforms:macos_arm64",
+    "@llvm//platforms:linux_amd64_musl",
+    "@llvm//platforms:linux_arm64_musl",
+    "@llvm//platforms:windows_amd64",
 ]
 
 config_setting(
@@ -35,7 +35,7 @@ cc_binary(
     platform_transition_binary(
         name = "for_" + platform.split(":")[1],
         binary = ":pkgutil",
-        tags = ["manual"] + ["no-remote"] if platform == "@toolchains_llvm_bootstrapped//platforms:macos_arm64" else [],
+        tags = ["manual"],
         target_platform = platform,
     )
     for platform in PLATFORMS

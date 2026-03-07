@@ -1,18 +1,18 @@
 load("@bazel_lib//lib:run_binary.bzl", "run_binary")
-load("@rules_zig//zig:defs.bzl", "zig_binary")
 load("@bazel_skylib//rules:native_binary.bzl", "native_test")
+load("@rules_zig//zig:defs.bzl", "zig_binary")
 load(":exec_test.bzl", "exec_test")
 
 zig_binary(
     name = "test",
-    main = "test.zig",
     testonly = True,
+    main = "test.zig",
     tags = ["manual"],
 )
 
 run_binary(
     name = "pkgutil_component_expand_action",
-    tool = "//:pkgutil",
+    testonly = True,
     srcs = [
         "@component_pkg//file",
     ],
@@ -22,13 +22,13 @@ run_binary(
         "$@",
     ],
     out_dirs = ["pkgutil-component-expand"],
-    testonly = True,
     tags = ["manual"],
+    tool = "//:pkgutil",
 )
 
 run_binary(
     name = "pkgutil_component_expand_full_action",
-    tool = "//:pkgutil",
+    testonly = True,
     srcs = [
         "@component_pkg//file",
     ],
@@ -40,13 +40,13 @@ run_binary(
         "$@",
     ],
     out_dirs = ["pkgutil-component-expand-full"],
-    testonly = True,
     tags = ["manual"],
+    tool = "//:pkgutil",
 )
 
 run_binary(
     name = "pkgutil_component_expand_full_strip_6_action",
-    tool = "//:pkgutil",
+    testonly = True,
     srcs = [
         "@component_pkg//file",
     ],
@@ -60,13 +60,13 @@ run_binary(
         "$@",
     ],
     out_dirs = ["pkgutil-component-expand-full-strip-6"],
-    testonly = True,
     tags = ["manual"],
+    tool = "//:pkgutil",
 )
 
 run_binary(
     name = "pkgutil_component_expand_full_strip_6_usr_filter_action",
-    tool = "//:pkgutil",
+    testonly = True,
     srcs = [
         "@component_pkg//file",
     ],
@@ -86,13 +86,13 @@ run_binary(
         "$@",
     ],
     out_dirs = ["pkgutil-component-expand-full-strip-6-usr-filter"],
-    testonly = True,
     tags = ["manual"],
+    tool = "//:pkgutil",
 )
 
 run_binary(
     name = "pkgutil_product_expand_action",
-    tool = "//:pkgutil",
+    testonly = True,
     srcs = [
         "@product_pkg//file",
     ],
@@ -102,13 +102,13 @@ run_binary(
         "$@",
     ],
     out_dirs = ["pkgutil-product-expand"],
-    testonly = True,
     tags = ["manual"],
+    tool = "//:pkgutil",
 )
 
 run_binary(
     name = "pkgutil_product_expand_full_action",
-    tool = "//:pkgutil",
+    testonly = True,
     srcs = [
         "@product_pkg//file",
     ],
@@ -137,8 +137,8 @@ run_binary(
         "$@",
     ],
     out_dirs = ["pkgutil-product-expand-full"],
-    testonly = True,
     tags = ["manual"],
+    tool = "//:pkgutil",
 )
 
 exec_test(

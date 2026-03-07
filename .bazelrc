@@ -24,4 +24,4 @@ common --experimental_remote_execution_keepalive
 common --grpc_keepalive_time=30s
 common:remote --remote_executor=grpcs://remote.buildbuddy.io
 common:remote --jobs=800
-common:remote --extra_execution_platforms=@toolchains_llvm_bootstrapped//:rbe_platform
+common:remote --extra_execution_platforms=@llvm//:rbe_platform
