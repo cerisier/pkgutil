@@ -204,6 +204,9 @@ exec_test(
         "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr",
         "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/System",
         "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/usr/lib/libNFC_HAL.tbd",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/System/Library/Frameworks/AppKit.framework/AppKit.tbd",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/System/Library/Frameworks/AppKit.framework/Versions/Current/AppKit.tbd",
+        "$(location :pkgutil_component_expand_full_strip_6_usr_filter_action)/System/Library/Frameworks/AppKit.framework/Headers/AppKit.h",
     ],
     data = [
         ":pkgutil_component_expand_full_strip_6_usr_filter_action",

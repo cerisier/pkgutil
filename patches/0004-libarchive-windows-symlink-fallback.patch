@@ -1,0 +1,598 @@
+diff --git a/libarchive/archive.h b/libarchive/archive.h
+index 530e55d..e3cfb7c 100644
+--- a/libarchive/archive.h
++++ b/libarchive/archive.h
+@@ -747,6 +747,8 @@ __LA_DECL int archive_read_set_passphrase_callback(struct archive *,
+ #define	ARCHIVE_EXTRACT_CLEAR_NOCHANGE_FFLAGS	(0x20000)
+ /* Default: Do not extract atomically (using rename) */
+ #define	ARCHIVE_EXTRACT_SAFE_WRITES		(0x40000)
++/* Default: Do not materialize Windows symlinks when symlink creation fails. */
++#define	ARCHIVE_EXTRACT_WINDOWS_SYMLINK_FALLBACK	(0x80000)
+ 
+ __LA_DECL int archive_read_extract(struct archive *, struct archive_entry *,
+ 		     int flags);
+diff --git a/libarchive/archive_write_disk_windows.c b/libarchive/archive_write_disk_windows.c
+index c7339c4..e650990 100644
+--- a/libarchive/archive_write_disk_windows.c
++++ b/libarchive/archive_write_disk_windows.c
+@@ -47,6 +47,7 @@
+ #ifdef HAVE_STDLIB_H
+ #include <stdlib.h>
+ #endif
++#include <stddef.h>
+ #include <winioctl.h>
+ 
+ /* TODO: Support Mac OS 'quarantine' feature.  This is really just a
+@@ -69,6 +70,13 @@
+ /* Old SDKs do not provide IO_REPARSE_TAG_SYMLINK */
+ #define	IO_REPARSE_TAG_SYMLINK 0xA000000CL
+ #endif
++#ifndef IO_REPARSE_TAG_MOUNT_POINT
++/* Old SDKs do not provide IO_REPARSE_TAG_MOUNT_POINT */
++#define	IO_REPARSE_TAG_MOUNT_POINT 0xA0000003L
++#endif
++#ifndef MAXIMUM_REPARSE_DATA_BUFFER_SIZE
++#define	MAXIMUM_REPARSE_DATA_BUFFER_SIZE (16 * 1024)
++#endif
+ 
+ static BOOL SetFilePointerEx_perso(HANDLE hFile,
+                              LARGE_INTEGER liDistanceToMove,
+@@ -100,6 +108,7 @@ struct fixup_entry {
+ 	unsigned long		 fflags_set;
+ 	int			 fixup; /* bitmask of what needs fixing */
+ 	wchar_t			*name;
++	wchar_t			*symlink_target;
+ };
+ 
+ /*
+@@ -128,6 +137,7 @@ struct fixup_entry {
+ #define	TODO_ACLS		ARCHIVE_EXTRACT_ACL
+ #define	TODO_XATTR		ARCHIVE_EXTRACT_XATTR
+ #define	TODO_MAC_METADATA	ARCHIVE_EXTRACT_MAC_METADATA
++#define	TODO_SYMLINK_FALLBACK	0x01000000
+ 
+ struct archive_write_disk {
+ 	struct archive	archive;
+@@ -187,6 +197,7 @@ struct archive_write_disk {
+ 	int			 restore_pwd;
+ 	/* Mode we should use for this entry; affected by _PERM and umask. */
+ 	mode_t			 mode;
++	wchar_t			*symlink_fallback_root;
+ 	/* UID/GID to use in restoring this entry. */
+ 	int64_t			 uid;
+ 	int64_t			 gid;
+@@ -211,6 +222,8 @@ static int	disk_unlink(const wchar_t *);
+ static int	disk_rmdir(const wchar_t *);
+ static int	check_symlinks(struct archive_write_disk *);
+ static int	create_filesystem_object(struct archive_write_disk *);
++static struct fixup_entry *new_fixup(struct archive_write_disk *,
++		    const wchar_t *pathname);
+ static struct fixup_entry *current_fixup(struct archive_write_disk *,
+ 		    const wchar_t *pathname);
+ static int	cleanup_pathname(struct archive_write_disk *, wchar_t *);
+@@ -234,6 +247,10 @@ static int	set_times(struct archive_write_disk *, HANDLE, int,
+ 		    const wchar_t *, time_t, long, time_t, long, time_t,
+ 		    long, time_t, long);
+ static int	set_times_from_entry(struct archive_write_disk *);
++static int	queue_symlink_fallback(struct archive_write_disk *,
++		    const wchar_t *, const wchar_t *);
++static int	create_symlink_fallbacks(struct archive_write_disk *,
++		    struct fixup_entry *);
+ static struct fixup_entry *sort_dir_list(struct fixup_entry *p);
+ static ssize_t	write_data_block(struct archive_write_disk *,
+ 		    const char *, size_t);
+@@ -763,6 +780,456 @@ la_CreateSymbolicLinkW(const wchar_t *linkname, const wchar_t *target,
+ 	return (ret);
+ }
+ 
++static int
++wc_is_path_separator(wchar_t c)
++{
++	return (c == L'\\' || c == L'/');
++}
++
++static size_t
++win_path_root_len(const wchar_t *path)
++{
++	size_t i;
++
++	if (path == NULL)
++		return (0);
++	if (path[0] == L'\\' && path[1] == L'\\' &&
++	    path[2] == L'?' && path[3] == L'\\' &&
++	    (path[4] == L'U' || path[4] == L'u') &&
++	    (path[5] == L'N' || path[5] == L'n') &&
++	    (path[6] == L'C' || path[6] == L'c') &&
++	    path[7] == L'\\') {
++		i = 8;
++		while (path[i] != L'\0' && !wc_is_path_separator(path[i]))
++			i++;
++		if (path[i] == L'\0')
++			return (0);
++		i++;
++		while (path[i] != L'\0' && !wc_is_path_separator(path[i]))
++			i++;
++		if (path[i] == L'\0')
++			return (i);
++		return (i + 1);
++	}
++	if (path[0] == L'\\' && path[1] == L'\\' &&
++	    path[2] == L'?' && path[3] == L'\\' &&
++	    path[4] != L'\0' && path[5] == L':' &&
++	    wc_is_path_separator(path[6]))
++		return (7);
++	if (path[0] == L'\\' && path[1] == L'\\') {
++		i = 2;
++		while (path[i] != L'\0' && !wc_is_path_separator(path[i]))
++			i++;
++		if (path[i] == L'\0')
++			return (0);
++		i++;
++		while (path[i] != L'\0' && !wc_is_path_separator(path[i]))
++			i++;
++		if (path[i] == L'\0')
++			return (i);
++		return (i + 1);
++	}
++	if (path[0] != L'\0' && path[1] == L':' &&
++	    wc_is_path_separator(path[2]))
++		return (3);
++	return (0);
++}
++
++static wchar_t *
++normalize_full_path_w(const wchar_t *path)
++{
++	wchar_t *out;
++	size_t root_len, out_len;
++
++	root_len = win_path_root_len(path);
++	if (root_len == 0)
++		return (NULL);
++	out = malloc((wcslen(path) + 1) * sizeof(*out));
++	if (out == NULL)
++		return (NULL);
++	for (out_len = 0; out_len < root_len; out_len++)
++		out[out_len] = wc_is_path_separator(path[out_len]) ?
++		    L'\\' : path[out_len];
++	out[out_len] = L'\0';
++
++	for (const wchar_t *p = path + root_len; *p != L'\0';) {
++		const wchar_t *seg;
++		size_t seg_len;
++
++		while (wc_is_path_separator(*p))
++			p++;
++		seg = p;
++		while (*p != L'\0' && !wc_is_path_separator(*p))
++			p++;
++		seg_len = (size_t)(p - seg);
++		if (seg_len == 0 || (seg_len == 1 && seg[0] == L'.'))
++			continue;
++		if (seg_len == 2 && seg[0] == L'.' && seg[1] == L'.') {
++			if (out_len <= root_len) {
++				free(out);
++				return (NULL);
++			}
++			while (out_len > root_len &&
++			    !wc_is_path_separator(out[out_len - 1]))
++				out_len--;
++			if (out_len > root_len)
++				out_len--;
++			out[out_len] = L'\0';
++			continue;
++		}
++		if (out_len > root_len && !wc_is_path_separator(out[out_len - 1]))
++			out[out_len++] = L'\\';
++		memcpy(out + out_len, seg, seg_len * sizeof(*out));
++		out_len += seg_len;
++		out[out_len] = L'\0';
++	}
++	return (out);
++}
++
++static int
++path_is_under_root(const wchar_t *root, const wchar_t *path)
++{
++	size_t root_len = wcslen(root);
++	size_t path_len = wcslen(path);
++	size_t min_root_len = win_path_root_len(root);
++
++	while (root_len > min_root_len && wc_is_path_separator(root[root_len - 1]))
++		root_len--;
++	if (path_len < root_len)
++		return (0);
++	if (_wcsnicmp(root, path, root_len) != 0)
++		return (0);
++	return (path[root_len] == L'\0' || wc_is_path_separator(path[root_len]));
++}
++
++static int
++symlink_target_is_absolute(const wchar_t *target)
++{
++	if (target == NULL || target[0] == L'\0')
++		return (1);
++	if (wc_is_path_separator(target[0]))
++		return (1);
++	return (target[0] != L'\0' && target[1] == L':');
++}
++
++static wchar_t *
++symlink_target_path(const wchar_t *linkname, const wchar_t *target)
++{
++	wchar_t *joined, *normalized;
++	size_t root_len, parent_len, target_len;
++
++	if (symlink_target_is_absolute(target))
++		return (NULL);
++
++	root_len = win_path_root_len(linkname);
++	parent_len = wcslen(linkname);
++	while (parent_len > root_len && !wc_is_path_separator(linkname[parent_len - 1]))
++		parent_len--;
++	if (parent_len > root_len)
++		parent_len--;
++
++	target_len = wcslen(target);
++	joined = malloc((parent_len + 1 + target_len + 1) * sizeof(*joined));
++	if (joined == NULL)
++		return (NULL);
++	memcpy(joined, linkname, parent_len * sizeof(*joined));
++	if (parent_len > 0 && !wc_is_path_separator(joined[parent_len - 1]))
++		joined[parent_len++] = L'\\';
++	memcpy(joined + parent_len, target, (target_len + 1) * sizeof(*joined));
++	normalized = normalize_full_path_w(joined);
++	free(joined);
++	return (normalized);
++}
++
++static int
++remove_existing_symlink_fallback(const wchar_t *path)
++{
++	DWORD attrs = GetFileAttributesW(path);
++
++	if (attrs == INVALID_FILE_ATTRIBUTES)
++		return (ARCHIVE_OK);
++	if (attrs & FILE_ATTRIBUTE_DIRECTORY)
++		return (disk_rmdir(path) == 0 ? ARCHIVE_OK : ARCHIVE_FAILED);
++	return (disk_unlink(path) == 0 ? ARCHIVE_OK : ARCHIVE_FAILED);
++}
++
++static wchar_t *
++junction_substitute_name(const wchar_t *target)
++{
++	const wchar_t *prefix = L"\\??\\";
++	const wchar_t *rest = target;
++	wchar_t *out;
++	size_t prefix_len, rest_len;
++
++	if (wcsncmp(target, L"\\\\?\\UNC\\", 8) == 0) {
++		prefix = L"\\??\\UNC\\";
++		rest = target + 8;
++	} else if (wcsncmp(target, L"\\\\?\\", 4) == 0) {
++		rest = target + 4;
++	}
++	prefix_len = wcslen(prefix);
++	rest_len = wcslen(rest);
++	out = malloc((prefix_len + rest_len + 1) * sizeof(*out));
++	if (out == NULL)
++		return (NULL);
++	memcpy(out, prefix, prefix_len * sizeof(*out));
++	memcpy(out + prefix_len, rest, (rest_len + 1) * sizeof(*out));
++	return (out);
++}
++
++static wchar_t *
++junction_print_name(const wchar_t *target)
++{
++	if (wcsncmp(target, L"\\\\?\\UNC\\", 8) == 0) {
++		const wchar_t *rest = target + 8;
++		size_t rest_len = wcslen(rest);
++		wchar_t *out = malloc((rest_len + 3) * sizeof(*out));
++		if (out == NULL)
++			return (NULL);
++		out[0] = L'\\';
++		out[1] = L'\\';
++		memcpy(out + 2, rest, (rest_len + 1) * sizeof(*out));
++		return (out);
++	}
++	if (wcsncmp(target, L"\\\\?\\", 4) == 0)
++		return (_wcsdup(target + 4));
++	return (_wcsdup(target));
++}
++
++struct mount_point_reparse_buffer {
++	DWORD	 reparse_tag;
++	WORD	 reparse_data_length;
++	WORD	 reserved;
++	WORD	 substitute_name_offset;
++	WORD	 substitute_name_length;
++	WORD	 print_name_offset;
++	WORD	 print_name_length;
++	WCHAR	 path_buffer[1];
++};
++
++static int
++create_junction_fallback(struct archive_write_disk *a, const wchar_t *linkname,
++    const wchar_t *target)
++{
++	struct mount_point_reparse_buffer *buffer;
++	wchar_t *substitute, *print;
++	size_t substitute_bytes, print_bytes, path_bytes, data_length, total;
++	HANDLE handle;
++	DWORD bytes_returned;
++	BOOL ok;
++
++	if (remove_existing_symlink_fallback(linkname) != ARCHIVE_OK) {
++		archive_set_error(&a->archive, errno,
++		    "Can't remove existing symlink fallback '%ls'", linkname);
++		return (ARCHIVE_FAILED);
++	}
++	if (!CreateDirectoryW(linkname, NULL)) {
++		la_dosmaperr(GetLastError());
++		archive_set_error(&a->archive, errno,
++		    "Can't create symlink fallback directory '%ls'", linkname);
++		return (ARCHIVE_FAILED);
++	}
++
++	substitute = junction_substitute_name(target);
++	print = junction_print_name(target);
++	if (substitute == NULL || print == NULL) {
++		free(substitute);
++		free(print);
++		archive_set_error(&a->archive, ENOMEM,
++		    "Can't allocate junction target");
++		return (ARCHIVE_FATAL);
++	}
++	substitute_bytes = wcslen(substitute) * sizeof(WCHAR);
++	print_bytes = wcslen(print) * sizeof(WCHAR);
++	path_bytes = substitute_bytes + sizeof(WCHAR) + print_bytes +
++	    sizeof(WCHAR);
++	data_length = 4 * sizeof(WORD) + path_bytes;
++	total = offsetof(struct mount_point_reparse_buffer, path_buffer) +
++	    path_bytes;
++	if (data_length > 0xffff ||
++	    total > MAXIMUM_REPARSE_DATA_BUFFER_SIZE) {
++		free(substitute);
++		free(print);
++		archive_set_error(&a->archive, ENAMETOOLONG,
++		    "Junction target is too long");
++		return (ARCHIVE_FAILED);
++	}
++	buffer = calloc(1, total);
++	if (buffer == NULL) {
++		free(substitute);
++		free(print);
++		archive_set_error(&a->archive, ENOMEM,
++		    "Can't allocate junction data");
++		return (ARCHIVE_FATAL);
++	}
++
++	buffer->reparse_tag = IO_REPARSE_TAG_MOUNT_POINT;
++	buffer->reparse_data_length = (WORD)data_length;
++	buffer->substitute_name_offset = 0;
++	buffer->substitute_name_length = (WORD)substitute_bytes;
++	buffer->print_name_offset = (WORD)(substitute_bytes + sizeof(WCHAR));
++	buffer->print_name_length = (WORD)print_bytes;
++	memcpy(buffer->path_buffer, substitute, substitute_bytes);
++	memcpy((char *)buffer->path_buffer + substitute_bytes + sizeof(WCHAR),
++	    print, print_bytes);
++	free(substitute);
++	free(print);
++
++	handle = CreateFileW(linkname, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
++	    FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, NULL);
++	if (handle == INVALID_HANDLE_VALUE) {
++		free(buffer);
++		la_dosmaperr(GetLastError());
++		archive_set_error(&a->archive, errno,
++		    "Can't open symlink fallback directory '%ls'", linkname);
++		return (ARCHIVE_FAILED);
++	}
++
++	ok = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer,
++	    (DWORD)total, NULL, 0, &bytes_returned, NULL);
++	CloseHandle(handle);
++	free(buffer);
++	if (!ok) {
++		la_dosmaperr(GetLastError());
++		archive_set_error(&a->archive, errno,
++		    "Can't create junction '%ls'", linkname);
++		return (ARCHIVE_FAILED);
++	}
++	return (ARCHIVE_OK);
++}
++
++static int
++create_file_symlink_fallback(struct archive_write_disk *a,
++    const wchar_t *linkname, const wchar_t *target)
++{
++	if (remove_existing_symlink_fallback(linkname) != ARCHIVE_OK) {
++		archive_set_error(&a->archive, errno,
++		    "Can't remove existing symlink fallback '%ls'", linkname);
++		return (ARCHIVE_FAILED);
++	}
++	if (la_CreateHardLinkW((wchar_t *)linkname, (wchar_t *)target))
++		return (ARCHIVE_OK);
++	if (CopyFileW(target, linkname, FALSE))
++		return (ARCHIVE_OK);
++	la_dosmaperr(GetLastError());
++	archive_set_error(&a->archive, errno,
++	    "Can't materialize symlink fallback '%ls'", linkname);
++	return (ARCHIVE_FAILED);
++}
++
++static int
++materialize_symlink_fallback(struct archive_write_disk *a,
++    struct fixup_entry *fe, int only_directories, int missing_is_error,
++    int *created)
++{
++	wchar_t *target;
++	DWORD attrs;
++	int r;
++
++	target = symlink_target_path(fe->name, fe->symlink_target);
++	if (target == NULL || !path_is_under_root(a->symlink_fallback_root, target)) {
++		free(target);
++		archive_set_error(&a->archive, EINVAL,
++		    "Refusing symlink fallback outside extraction root: '%ls' -> '%ls'",
++		    fe->name, fe->symlink_target);
++		return (ARCHIVE_FAILED);
++	}
++
++	attrs = GetFileAttributesW(target);
++	if (attrs == INVALID_FILE_ATTRIBUTES) {
++		free(target);
++		if (!missing_is_error)
++			return (ARCHIVE_OK);
++		la_dosmaperr(GetLastError());
++		archive_set_error(&a->archive, errno,
++		    "Can't resolve symlink fallback target '%ls' -> '%ls'",
++		    fe->name, fe->symlink_target);
++		return (ARCHIVE_FAILED);
++	}
++	if (attrs & FILE_ATTRIBUTE_DIRECTORY) {
++		r = create_junction_fallback(a, fe->name, target);
++	} else if (only_directories) {
++		free(target);
++		return (ARCHIVE_OK);
++	} else {
++		r = create_file_symlink_fallback(a, fe->name, target);
++	}
++	free(target);
++	if (r == ARCHIVE_OK) {
++		fe->fixup &= ~TODO_SYMLINK_FALLBACK;
++		*created = 1;
++	}
++	return (r);
++}
++
++static int
++queue_symlink_fallback(struct archive_write_disk *a, const wchar_t *linkname,
++    const wchar_t *target)
++{
++	struct fixup_entry *fe;
++
++	if (a->symlink_fallback_root == NULL) {
++		wchar_t *root = __la_win_permissive_name_w(L".");
++		if (root == NULL)
++			return (ENOMEM);
++		a->symlink_fallback_root = normalize_full_path_w(root);
++		free(root);
++		if (a->symlink_fallback_root == NULL)
++			return (ENOMEM);
++	}
++	if (!path_is_under_root(a->symlink_fallback_root, linkname))
++		return (EINVAL);
++
++	fe = new_fixup(a, linkname);
++	if (fe == NULL)
++		return (ENOMEM);
++	fe->symlink_target = _wcsdup(target);
++	if (fe->symlink_target == NULL)
++		return (ENOMEM);
++	fe->fixup |= TODO_SYMLINK_FALLBACK;
++	return (0);
++}
++
++static int
++create_symlink_fallbacks(struct archive_write_disk *a, struct fixup_entry *p)
++{
++	struct fixup_entry *fe;
++	int created, r;
++
++	if (a->symlink_fallback_root == NULL)
++		return (ARCHIVE_OK);
++
++	do {
++		created = 0;
++		for (fe = p; fe != NULL; fe = fe->next) {
++			if ((fe->fixup & TODO_SYMLINK_FALLBACK) == 0)
++				continue;
++			r = materialize_symlink_fallback(a, fe, 1, 0, &created);
++			if (r != ARCHIVE_OK)
++				return (r);
++		}
++	} while (created);
++
++	do {
++		created = 0;
++		for (fe = p; fe != NULL; fe = fe->next) {
++			if ((fe->fixup & TODO_SYMLINK_FALLBACK) == 0)
++				continue;
++			r = materialize_symlink_fallback(a, fe, 0, 0, &created);
++			if (r != ARCHIVE_OK)
++				return (r);
++		}
++	} while (created);
++
++	for (fe = p; fe != NULL; fe = fe->next)
++		if (fe->fixup & TODO_SYMLINK_FALLBACK) {
++			created = 0;
++			return (materialize_symlink_fallback(a, fe, 0, 1,
++			    &created));
++		}
++	return (ARCHIVE_OK);
++}
++
+ static int
+ la_ftruncate(HANDLE handle, int64_t length)
+ {
+@@ -1812,12 +2279,21 @@ create_filesystem_object(struct archive_write_disk *a)
+ #if HAVE_SYMLINK
+ 		return symlink(linkname, a->name) ? errno : 0;
+ #else
++		DWORD lasterr;
+ 		errno = 0;
+ 		r = la_CreateSymbolicLinkW((const wchar_t *)a->name, linkname,
+ 		    archive_entry_symlink_type(a->entry));
+ 		if (r == 0) {
++			lasterr = GetLastError();
++			if ((a->flags & ARCHIVE_EXTRACT_WINDOWS_SYMLINK_FALLBACK)
++			    && lasterr == ERROR_PRIVILEGE_NOT_HELD) {
++				r = queue_symlink_fallback(a, a->name, linkname);
++				a->todo = 0;
++				a->deferred = 0;
++				return (r);
++			}
+ 			if (errno == 0)
+-				la_dosmaperr(GetLastError());
++				la_dosmaperr(lasterr);
+ 			r = errno;
+ 		} else
+ 			r = 0;
+@@ -1975,6 +2451,12 @@ _archive_write_disk_close(struct archive *_a)
+ 	/* Sort dir list so directories are fixed up in depth-first order. */
+ 	p = sort_dir_list(a->fixup_list);
+ 
++	if (ret != ARCHIVE_FATAL) {
++		int r2 = create_symlink_fallbacks(a, p);
++		if (r2 < ret)
++			ret = r2;
++	}
++
+ 	while (p != NULL) {
+ 		a->pst = NULL; /* Mark stat cache as out-of-date. */
+ 		if (p->fixup & TODO_TIMES) {
+@@ -1993,10 +2475,13 @@ _archive_write_disk_close(struct archive *_a)
+ 		next = p->next;
+ 		archive_acl_clear(&p->acl);
+ 		free(p->name);
++		free(p->symlink_target);
+ 		free(p);
+ 		p = next;
+ 	}
+ 	a->fixup_list = NULL;
++	free(a->symlink_fallback_root);
++	a->symlink_fallback_root = NULL;
+ 	return (ret);
+ }
+ 
+@@ -2018,6 +2503,7 @@ _archive_write_disk_free(struct archive *_a)
+ 	archive_wstring_free(&a->_tmpname_data);
+ 	archive_string_free(&a->archive.error_string);
+ 	archive_wstring_free(&a->path_safe);
++	free(a->symlink_fallback_root);
+ 	a->archive.magic = 0;
+ 	__archive_clean(&a->archive);
+ 	free(a);

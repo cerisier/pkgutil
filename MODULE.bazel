@@ -27,6 +27,7 @@ single_version_override(
         "//patches:0001-libarchive_enable_xar_support.patch",
         "//patches:0002-feat-add-pbzx-read-filter.patch",
         "//patches:0003-give-mingw-acceptable-posix-types.patch",
+        "//patches:0004-libarchive-windows-symlink-fallback.patch",
     ],
 )
 
